@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import gsap from "gsap";
-import { nextTick, ref } from "vue";
+import { nextTick, onUnmounted, ref } from "vue";
 import "@/assets/main.css";
 
 const isDragging = ref(false);
 const showCapsuleMenu = ref(false);
 const isPinned = ref(false);
 const capsuleRef = ref<HTMLElement | null>(null);
+
+// 长按相关状态
+const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
+const isLongPressing = ref(false);
+const longPressTriggered = ref(false); // 标记长按是否已触发
+const LONG_PRESS_DURATION = 500; // 长按触发时间（毫秒）
 
 // 使用 Tauri API 实现窗口拖动
 const startDrag = async () => {
@@ -25,18 +31,19 @@ const startDrag = async () => {
 	}
 };
 
-// 双击打开/关闭胶囊菜单
-const handleDoubleClick = async () => {
-	showCapsuleMenu.value = !showCapsuleMenu.value;
-	if (showCapsuleMenu.value) {
-		await nextTick();
-		// 入场动画
-		if (capsuleRef.value) {
-			gsap.fromTo(capsuleRef.value, { opacity: 0, scale: 0.8, y: -10 }, { opacity: 1, scale: 1, y: 0, duration: 0.3, ease: "back.out(1.7)" });
-			// 按钮依次入场
-			const buttons = capsuleRef.value.querySelectorAll(".capsule-btn");
-			gsap.fromTo(buttons, { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.2, stagger: 0.05, ease: "back.out(2)", delay: 0.1 });
-		}
+// 打开胶囊菜单（带动画）
+const openCapsuleMenu = async () => {
+	if (showCapsuleMenu.value)
+		return;
+
+	showCapsuleMenu.value = true;
+	await nextTick();
+	// 入场动画
+	if (capsuleRef.value) {
+		gsap.fromTo(capsuleRef.value, { opacity: 0, scale: 0.8, y: -10 }, { opacity: 1, scale: 1, y: 0, duration: 0.3, ease: "back.out(1.7)" });
+		// 按钮依次入场
+		const buttons = capsuleRef.value.querySelectorAll(".capsule-btn");
+		gsap.fromTo(buttons, { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.2, stagger: 0.05, ease: "back.out(2)", delay: 0.1 });
 	}
 };
 
@@ -57,6 +64,71 @@ const closeCapsuleMenu = () => {
 		showCapsuleMenu.value = false;
 	}
 };
+
+// 清除长按计时器
+const clearLongPressTimer = () => {
+	if (longPressTimer.value) {
+		clearTimeout(longPressTimer.value);
+		longPressTimer.value = null;
+	}
+	isLongPressing.value = false;
+};
+
+// 重置长按状态（不清除计时器）
+const resetLongPressState = () => {
+	isLongPressing.value = false;
+	longPressTriggered.value = false;
+};
+
+// 双击打开/关闭胶囊菜单
+const handleDoubleClick = async () => {
+	// 清除长按计时器
+	clearLongPressTimer();
+
+	if (showCapsuleMenu.value) {
+		closeCapsuleMenu();
+	} else {
+		await openCapsuleMenu();
+	}
+};
+
+// 长按开始 - 同时启动拖动和长按计时
+const handleLongPressStart = (_e: MouseEvent | TouchEvent) => {
+	// 清除之前的计时器
+	clearLongPressTimer();
+	longPressTriggered.value = false;
+
+	// 立即启动拖动
+	startDrag();
+
+	isLongPressing.value = true;
+	longPressTimer.value = setTimeout(async () => {
+		// 长按触发，切换菜单状态
+		longPressTriggered.value = true;
+		if (showCapsuleMenu.value) {
+			closeCapsuleMenu();
+		} else {
+			await openCapsuleMenu();
+		}
+		isLongPressing.value = false;
+	}, LONG_PRESS_DURATION);
+};
+
+// 长按结束
+const handleLongPressEnd = () => {
+	// 如果长按已经触发（菜单已打开/关闭），只重置视觉状态
+	if (longPressTriggered.value) {
+		resetLongPressState();
+		return;
+	}
+	// 如果长按未触发，清除计时器
+	clearLongPressTimer();
+};
+
+// 组件卸载时清除计时器
+onUnmounted(() => {
+	clearLongPressTimer();
+});
 
 // 窗口操作
 const handleClose = async () => {
@@ -92,10 +164,13 @@ const handleClickOutside = (e: MouseEvent) => {
 
 <template>
 	<div class="app-container" @click="handleClickOutside">
-		<!-- 顶部拖拽区域 - 使用 mousedown 触发拖动，双击打开菜单 -->
+		<!-- 顶部拖拽区域 - 双击或长按打开菜单 -->
 		<div
-			class="drag-handle" :class="{ dragging: isDragging }" @mousedown="startDrag"
+			class="drag-handle" :class="{ 'dragging': isDragging, 'long-pressing': isLongPressing }"
+			@mousedown="handleLongPressStart" @mouseup="handleLongPressEnd" @mouseleave="handleLongPressEnd"
+			@touchstart.passive="handleLongPressStart" @touchend="handleLongPressEnd" @touchcancel="handleLongPressEnd"
 			@dblclick.stop="handleDoubleClick"
+			@click.stop
 		>
 			<div class="drag-indicator">
 				<span class="indicator-dot" />
@@ -133,6 +208,8 @@ $transition-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 	flex-direction: column;
 	background: transparent;
 	overflow: hidden;
+	/* 创建独立堆叠上下文 */
+	isolation: isolate;
 }
 
 .drag-handle {
@@ -218,27 +295,104 @@ $transition-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 		background: var(--accent-color);
 		box-shadow: 0 0 8px rgba(0, 122, 255, 0.4);
 	}
+
+	// 长按状态 - 渐变发光效果
+	&.long-pressing .drag-indicator {
+		background: rgba(0, 122, 255, 0.15);
+		transform: scale(1.08);
+		animation: long-press-pulse 0.5s ease-in-out infinite;
+	}
+
+	&.long-pressing .indicator-dot {
+		opacity: 1;
+		transform: scale(1.3);
+		background: var(--accent-color);
+		animation: long-press-dot-pulse 0.5s ease-in-out infinite;
+	}
+
+	&.long-pressing .indicator-line {
+		width: 48px;
+		opacity: 1;
+		background: linear-gradient(90deg, var(--accent-color), #5ac8fa, var(--accent-color));
+		background-size: 200% 100%;
+		animation: long-press-gradient 1s linear infinite;
+		box-shadow: 0 0 12px rgba(0, 122, 255, 0.5);
+	}
+}
+
+// 长按动画关键帧
+@keyframes long-press-pulse {
+	0%,
+	100% {
+		transform: scale(1.05);
+		background: rgba(0, 122, 255, 0.12);
+	}
+	50% {
+		transform: scale(1.1);
+		background: rgba(0, 122, 255, 0.2);
+	}
+}
+
+@keyframes long-press-dot-pulse {
+	0%,
+	100% {
+		transform: scale(1.2);
+	}
+	50% {
+		transform: scale(1.4);
+	}
+}
+
+@keyframes long-press-gradient {
+	0% {
+		background-position: 0% 50%;
+	}
+	100% {
+		background-position: 200% 50%;
+	}
 }
 
 // 胶囊操作菜单
 .capsule-menu {
 	position: absolute;
-	top: 40px;
-	left: 50%;
-	transform: translateX(-50%);
+	top: 42px; // 紧贴拖拽指示器下方
+	left: 0;
+	right: 0;
+	margin: 0 auto;
+	width: fit-content;
 	display: flex;
 	align-items: center;
 	gap: 8px;
 	padding: 8px 12px;
-	background: var(--bg-glass);
-	backdrop-filter: blur(24px);
-	-webkit-backdrop-filter: blur(24px);
+	background: var(--bg-glass-elevated);
+
+	/* GPU 加速 - 防止 backdrop-filter 失效 */
+	isolation: isolate;
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+	will-change:
+		backdrop-filter,
+		-webkit-backdrop-filter,
+		transform,
+		opacity;
+
+	/* 双写 backdrop-filter 确保兼容性 */
+	-webkit-backdrop-filter: blur(var(--blur-amount, 24px)) saturate(var(--blur-saturate, 180%));
+	backdrop-filter: blur(var(--blur-amount, 24px)) saturate(var(--blur-saturate, 180%));
+
 	border: 1px solid var(--border-glass);
 	border-radius: 100px;
 	box-shadow:
 		0 8px 32px rgba(0, 0, 0, 0.12),
 		0 2px 8px rgba(0, 0, 0, 0.08);
 	z-index: 1001;
+}
+
+/* 降级方案 */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+	.capsule-menu {
+		background: var(--bg-glass-fallback-elevated);
+	}
 }
 
 .capsule-btn {
@@ -252,17 +406,24 @@ $transition-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 	background: rgba(128, 128, 128, 0.1);
 	color: var(--text-secondary);
 	cursor: pointer;
-	transition: all 0.2s $transition-spring;
 	font-size: 16px;
+	will-change: transform, background-color;
+	transform: translateZ(0); // 启用 GPU 加速
+	backface-visibility: hidden;
+	transition:
+		transform 0.25s $transition-spring,
+		background-color 0.2s ease-out,
+		color 0.2s ease-out;
 
 	&:hover {
-		transform: scale(1.1);
+		transform: translateZ(0) scale(1.1);
 		background: rgba(128, 128, 128, 0.2);
 		color: var(--text-primary);
 	}
 
 	&:active {
-		transform: scale(0.95);
+		transform: translateZ(0) scale(0.95);
+		transition-duration: 0.1s;
 	}
 
 	// 关闭按钮
@@ -296,5 +457,9 @@ $transition-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 .content-area {
 	flex: 1;
 	overflow: auto;
+	/* 创建独立堆叠上下文，确保子元素 backdrop-filter 正常工作 */
+	isolation: isolate;
+	-webkit-transform: translateZ(0);
+	transform: translateZ(0);
 }
 </style>

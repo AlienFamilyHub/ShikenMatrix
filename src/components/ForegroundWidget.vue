@@ -121,13 +121,27 @@ $max-width: 450px;
 	border: 1px solid var(--border-glass);
 	border-radius: 28px;
 	box-shadow: var(--shadow-card);
-	backdrop-filter: blur(24px);
-	-webkit-backdrop-filter: blur(24px);
+
+	/* GPU 加速 - 防止 backdrop-filter 失效 */
+	isolation: isolate;
+	-webkit-transform: translate3d(0, 0, 0);
+	transform: translate3d(0, 0, 0);
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+	will-change:
+		backdrop-filter,
+		-webkit-backdrop-filter,
+		transform;
+
+	/* 双写 backdrop-filter 确保兼容性 */
+	-webkit-backdrop-filter: blur(var(--blur-amount, 24px)) saturate(var(--blur-saturate, 180%));
+	backdrop-filter: blur(var(--blur-amount, 24px)) saturate(var(--blur-saturate, 180%));
+
 	overflow: hidden;
 	transition: all 0.4s $transition-spring;
 
 	&:hover {
-		transform: translateY(-4px) scale(1.01);
+		transform: translate3d(0, -4px, 0) scale(1.01);
 		background: var(--bg-glass-hover);
 		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
 
@@ -142,9 +156,16 @@ $max-width: 450px;
 	}
 }
 
+/* 降级方案 - 当 backdrop-filter 不支持时 */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+	.foreground-widget {
+		background: var(--bg-glass-fallback);
+	}
+}
+
 .widget-content {
 	display: flex;
-	flex-direction: column;
+	flex-direction: row;
 	align-items: center;
 	gap: 20px;
 }
@@ -155,6 +176,7 @@ $max-width: 450px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	flex-shrink: 0;
 }
 
 .icon-glow {
@@ -206,10 +228,11 @@ $max-width: 450px;
 .info-section {
 	display: flex;
 	flex-direction: column;
-	align-items: center;
+	align-items: flex-start;
 	gap: 6px;
 	width: 100%;
-	text-align: center;
+	text-align: left;
+	min-width: 0; /* 确保文本截断生效 */
 }
 
 .app-name {
@@ -220,7 +243,10 @@ $max-width: 450px;
 	letter-spacing: -0.3px;
 	line-height: 1.3;
 	white-space: nowrap;
-	text-align: center;
+	text-align: left;
+	width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
 
 	&.placeholder {
 		color: var(--text-tertiary);
@@ -235,7 +261,10 @@ $max-width: 450px;
 	color: var(--text-secondary);
 	line-height: 1.5;
 	white-space: nowrap;
-	text-align: center;
+	text-align: left;
+	width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
 
 	&.placeholder {
 		color: var(--text-tertiary);

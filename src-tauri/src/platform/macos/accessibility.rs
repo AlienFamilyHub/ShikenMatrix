@@ -48,6 +48,7 @@ pub fn request_accessibility_permission() -> Result<bool, String> {
 }
 
 /// 打开系统偏好设置中的辅助功能页面
+#[allow(unused)]
 pub fn open_accessibility_preferences() -> Result<(), String> {
     use std::process::Command;
 

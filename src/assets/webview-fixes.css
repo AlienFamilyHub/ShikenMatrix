@@ -1,0 +1,271 @@
+/**
+ * Tauri WebView 兼容性修复
+ * 解决 backdrop-filter 在某些情况下失效的问题
+ *
+ * 主要问题：
+ * 1. macOS WebView 在某些版本可能不支持或丢失 backdrop-filter
+ * 2. 透明窗口 + backdrop-filter 组合需要特殊处理
+ * 3. 硬件加速层叠问题导致模糊消失
+ *
+ * 解决方案：
+ * 1. 强制 GPU 加速 (will-change, transform: translateZ(0))
+ * 2. 创建隔离层 (isolation: isolate)
+ * 3. 提供降级方案 (@supports 检测)
+ * 4. 强制重绘触发器
+ */
+
+/* ========================================
+   全局 GPU 加速与渲染优化
+   ======================================== */
+
+html {
+	/* 强制整个页面使用 GPU 加速 */
+	-webkit-transform: translateZ(0);
+	transform: translateZ(0);
+	/* 防止文本渲染闪烁 */
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	/* 优化滚动性能 */
+	-webkit-overflow-scrolling: touch;
+}
+
+body {
+	/* 创建新的堆叠上下文，防止 z-index 混乱 */
+	isolation: isolate;
+	/* 确保背景完全透明 */
+	background: transparent !important;
+	/* 强制 GPU 渲染层 */
+	-webkit-transform: translate3d(0, 0, 0);
+	transform: translate3d(0, 0, 0);
+}
+
+/* ========================================
+   玻璃效果基础类 - 可复用
+   ======================================== */
+
+/**
+ * 使用方式: 在需要模糊效果的元素上添加 .glass-effect 类
+ * 或者直接使用 @extend .glass-effect (如果使用 SCSS)
+ */
+.glass-effect {
+	/* 创建独立的合成层，防止模糊泄漏 */
+	isolation: isolate;
+	/* 强制 GPU 加速 - 关键！ */
+	-webkit-transform: translateZ(0);
+	transform: translateZ(0);
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+	/* 提前告知浏览器将要变化的属性 */
+	will-change:
+		backdrop-filter,
+		-webkit-backdrop-filter,
+		transform,
+		opacity;
+	/* 双写确保兼容性 */
+	-webkit-backdrop-filter: blur(24px) saturate(180%);
+	backdrop-filter: blur(24px) saturate(180%);
+}
+
+/* ========================================
+   降级方案 - 当 backdrop-filter 不支持时
+   ======================================== */
+
+/* 检测 backdrop-filter 支持 */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+	.glass-effect,
+	.foreground-widget,
+	.media-widget,
+	.capsule-menu {
+		/* 使用更不透明的背景作为降级 */
+		background-color: rgba(255, 255, 255, 0.85) !important;
+	}
+
+	@media (prefers-color-scheme: dark) {
+		.glass-effect,
+		.foreground-widget,
+		.media-widget,
+		.capsule-menu {
+			background-color: rgba(30, 30, 35, 0.9) !important;
+		}
+	}
+}
+
+/* ========================================
+   强制触发 WebView 重绘
+   解决构建后模糊效果消失的问题
+   ======================================== */
+
+/**
+ * 使用动画强制 WebView 保持 GPU 层活跃
+ * 这是一个 0 变化的动画，不会影响视觉但会保持渲染层
+ */
+@keyframes force-gpu-layer {
+	0%,
+	100% {
+		-webkit-transform: translateZ(0);
+		transform: translateZ(0);
+	}
+}
+
+/* 应用到需要保持模糊效果的元素 */
+.glass-effect,
+[class*="widget"],
+.capsule-menu {
+	animation: force-gpu-layer 0.001s linear infinite paused;
+	animation-play-state: running;
+}
+
+/* ========================================
+   针对特定组件的修复
+   ======================================== */
+
+/* ForegroundWidget 修复 */
+.foreground-widget {
+	/* 创建独立合成层 */
+	isolation: isolate;
+	-webkit-transform: translate3d(0, 0, 0);
+	transform: translate3d(0, 0, 0);
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+	will-change:
+		backdrop-filter,
+		-webkit-backdrop-filter,
+		transform;
+
+	/* 确保 backdrop-filter 生效 */
+	-webkit-backdrop-filter: blur(24px) saturate(180%);
+	backdrop-filter: blur(24px) saturate(180%);
+}
+
+/* MediaWidget 修复 */
+.media-widget {
+	/* 创建独立合成层 */
+	isolation: isolate;
+	-webkit-transform: translate3d(0, 0, 0);
+	transform: translate3d(0, 0, 0);
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+	will-change:
+		backdrop-filter,
+		-webkit-backdrop-filter,
+		transform;
+
+	/* 确保 backdrop-filter 生效 */
+	-webkit-backdrop-filter: blur(24px) saturate(180%);
+	backdrop-filter: blur(24px) saturate(180%);
+}
+
+/* MediaWidget 内部模糊背景修复 */
+.artwork-blur-bg {
+	/* 确保子元素模糊不会影响父元素的 backdrop-filter */
+	isolation: isolate;
+	-webkit-transform: translate3d(0, 0, 0) scale(2);
+	transform: translate3d(0, 0, 0) scale(2);
+	/* 使用 GPU 加速的 filter */
+	-webkit-filter: blur(60px) saturate(1.5);
+	filter: blur(60px) saturate(1.5);
+}
+
+/* Capsule Menu 修复 */
+.capsule-menu {
+	isolation: isolate;
+	-webkit-transform: translate3d(-50%, 0, 0);
+	transform: translate3d(-50%, 0, 0);
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+	will-change:
+		backdrop-filter,
+		-webkit-backdrop-filter,
+		transform,
+		opacity;
+
+	-webkit-backdrop-filter: blur(24px) saturate(180%);
+	backdrop-filter: blur(24px) saturate(180%);
+}
+
+/* ========================================
+   macOS 特定修复
+   ======================================== */
+
+/**
+ * macOS WebKit 有时会在窗口失焦时丢失 backdrop-filter
+ * 使用伪元素作为备用模糊层
+ */
+.glass-effect-with-fallback {
+	position: relative;
+	isolation: isolate;
+}
+
+.glass-effect-with-fallback::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	border-radius: inherit;
+	/* 降级背景 - 当主 backdrop-filter 失效时可见 */
+	background: inherit;
+	opacity: 0;
+	transition: opacity 0.3s ease;
+	pointer-events: none;
+}
+
+/* 当检测到 backdrop-filter 可能失效时显示降级背景 */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+	.glass-effect-with-fallback::before {
+		/* 默认隐藏，由 JS 控制显示 */
+		opacity: 0;
+	}
+}
+
+/* ========================================
+   防止透明窗口问题
+   ======================================== */
+
+/**
+ * Tauri 透明窗口需要特殊处理
+ * 确保所有层级都正确设置透明度
+ */
+#__nuxt,
+.app-container {
+	background: transparent !important;
+	/* 确保子元素可以正常显示 backdrop-filter */
+	isolation: isolate;
+}
+
+/* 内容区域需要创建新的堆叠上下文 */
+.content-area {
+	isolation: isolate;
+	-webkit-transform: translateZ(0);
+	transform: translateZ(0);
+}
+
+/* ========================================
+   动画期间的 GPU 层保持
+   ======================================== */
+
+/**
+ * 在 GSAP 动画期间确保 GPU 层不会被回收
+ */
+.gsap-animated,
+[style*="transform"],
+[style*="opacity"] {
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+	-webkit-perspective: 1000px;
+	perspective: 1000px;
+}
+
+/* ========================================
+   调试工具 (开发时可取消注释)
+   ======================================== */
+
+/*
+.debug-backdrop-filter * {
+	outline: 1px solid rgba(255, 0, 0, 0.3);
+}
+
+.debug-backdrop-filter [style*="backdrop-filter"],
+.debug-backdrop-filter [style*="-webkit-backdrop-filter"] {
+	outline: 2px solid lime !important;
+}
+*/

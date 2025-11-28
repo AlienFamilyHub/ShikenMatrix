@@ -87,7 +87,8 @@ const updateWindowSize = async () => {
 			const appNameWidth = measureTextWidth(foregroundInfo.value.process_name, 20, 700);
 			const titleWidth = measureTextWidth(foregroundInfo.value.title || "", 13, 400);
 			const maxTextWidth = Math.max(appNameWidth, titleWidth);
-			neededWidth = Math.max(neededWidth, maxTextWidth + cardPadding + containerPadding);
+			// 布局改为行布局：图标72px + gap20px + 卡片内边距56px + 容器内边距40px
+			neededWidth = Math.max(neededWidth, maxTextWidth + 72 + 20 + cardPadding + containerPadding);
 		}
 
 		// 媒体信息 - 封面72px + gap20px + 卡片内边距24px*2

@@ -195,11 +195,13 @@ pub fn get_media_metadata() -> Result<Option<MediaMetadata>, String> {
 }
 
 /// 检查是否有媒体正在播放
+#[allow(unused)]
 pub fn check_is_playing() -> bool {
     is_playing()
 }
 
 /// 获取完整的 NowPlayingInfo (直接返回 mediaremote-rs 的结构)
+#[allow(unused)]
 pub fn get_now_playing_info() -> Option<NowPlayingInfo> {
     get_now_playing()
 }

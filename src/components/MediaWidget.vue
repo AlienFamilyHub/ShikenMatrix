@@ -134,13 +134,27 @@ $max-width: 450px;
 	border: 1px solid var(--border-glass);
 	border-radius: 28px;
 	box-shadow: var(--shadow-card);
-	backdrop-filter: blur(24px);
-	-webkit-backdrop-filter: blur(24px);
+
+	/* GPU 加速 - 防止 backdrop-filter 失效 */
+	isolation: isolate;
+	-webkit-transform: translate3d(0, 0, 0);
+	transform: translate3d(0, 0, 0);
+	-webkit-backface-visibility: hidden;
+	backface-visibility: hidden;
+	will-change:
+		backdrop-filter,
+		-webkit-backdrop-filter,
+		transform;
+
+	/* 双写 backdrop-filter 确保兼容性 */
+	-webkit-backdrop-filter: blur(var(--blur-amount, 24px)) saturate(var(--blur-saturate, 180%));
+	backdrop-filter: blur(var(--blur-amount, 24px)) saturate(var(--blur-saturate, 180%));
+
 	overflow: hidden;
 	transition: all 0.4s $transition-spring;
 
 	&:hover {
-		transform: translateY(-4px) scale(1.01);
+		transform: translate3d(0, -4px, 0) scale(1.01);
 		background: var(--bg-glass-hover);
 		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
 
@@ -158,6 +172,13 @@ $max-width: 450px;
 	}
 }
 
+/* 降级方案 - 当 backdrop-filter 不支持时 */
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+	.media-widget {
+		background: var(--bg-glass-fallback);
+	}
+}
+
 // 背景模糊封面
 .artwork-blur-bg {
 	position: absolute;
@@ -167,10 +188,16 @@ $max-width: 450px;
 	bottom: -50%;
 	background-size: cover;
 	background-position: center;
+	/* GPU 加速的 filter */
+	-webkit-filter: blur(60px) saturate(1.5);
 	filter: blur(60px) saturate(1.5);
 	opacity: 0.3;
-	transform: scale(2);
+	/* 使用 translate3d 替代 scale 以保持 GPU 层 */
+	-webkit-transform: translate3d(0, 0, 0) scale(2);
+	transform: translate3d(0, 0, 0) scale(2);
 	pointer-events: none;
+	/* 隔离层防止影响父元素 */
+	isolation: isolate;
 }
 
 .widget-content {

@@ -14,12 +14,15 @@ pub mod linux;
 
 // 重新导出当前平台的实现
 #[cfg(target_os = "macos")]
+#[allow(unused_imports)]
 pub use macos::*;
 
 #[cfg(target_os = "windows")]
+#[allow(unused_imports)]
 pub use windows::*;
 
 #[cfg(target_os = "linux")]
+#[allow(unused_imports)]
 pub use linux::*;
 
 /// 窗口信息
@@ -40,6 +43,7 @@ pub struct WindowInfo {
 /// 平台功能 trait
 ///
 /// 注意: PlaybackState 和 MediaMetadata 类型由各平台自行定义
+#[allow(unused)]
 pub trait PlatformProvider {
     /// 请求必要的权限
     fn request_permissions() -> Result<bool, String>;
