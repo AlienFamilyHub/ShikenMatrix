@@ -6,5 +6,9 @@
 	<string>ShikenMatrix 需要辅助功能权限来获取当前前台窗口信息。</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>ShikenMatrix 需要 Apple Events 权限来获取媒体播放信息。</string>
+	<key>CFBundleIconFile</key>
+	<string>icon.icns</string>
+	<key>CFBundleIconName</key>
+	<string>icon</string>
 </dict>
 </plist>

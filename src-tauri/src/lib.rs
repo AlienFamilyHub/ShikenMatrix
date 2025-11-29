@@ -1,11 +1,22 @@
 mod platform;
 
-use platform::WindowInfo;
+use platform::{
+    WindowInfo,
+    get_media_metadata, get_playback_state, MediaMetadata, PlaybackState
+};
+
+// Platform-specific window functions
 #[cfg(target_os = "macos")]
 use platform::macos::{
     get_frontmost_window_info_sync,
     request_accessibility_permission, check_accessibility_permission,
-    get_media_metadata, get_playback_state, MediaMetadata, PlaybackState
+};
+
+#[cfg(target_os = "windows")]
+use platform::windows::{
+    get_frontmost_window as get_frontmost_window_info_sync,
+    request_permissions as request_accessibility_permission,
+    check_permissions as check_accessibility_permission,
 };
 
 /// 异步获取前台窗口信息

@@ -60,3 +60,24 @@ objc2-app-kit = { version = "0.3.2", features = [
 ] }
 block2 = "0.6.2"
 mediaremote-rs = "0.1.1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+winapi = { version = "0.3.9", features = [
+  "winuser",
+  "processthreadsapi",
+  "psapi",
+  "handleapi",
+  "winnt",
+  "shellapi",
+  "commctrl",
+  "libloaderapi",
+  "wingdi",
+] }
+windows = { version = "0.61.1", features = [
+  "Media_Control",
+  "Foundation",
+  "Media_Playback",
+  "Storage",
+  "Storage_Streams",
+] }
+image = "0.24"
