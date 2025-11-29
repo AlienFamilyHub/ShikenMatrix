@@ -259,7 +259,6 @@ $transition-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 	background: var(--bg-glass);
 	border: 1px solid var(--border-glass);
 	border-radius: 28px;
-	box-shadow: var(--shadow-card);
 	backdrop-filter: blur(24px);
 	-webkit-backdrop-filter: blur(24px);
 	text-align: center;

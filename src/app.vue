@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import gsap from "gsap";
-import { nextTick, onUnmounted, ref } from "vue";
+import { nextTick, onMounted, onUnmounted, ref } from "vue";
 import "@/assets/main.css";
 
 const isDragging = ref(false);
@@ -38,24 +38,64 @@ const openCapsuleMenu = async () => {
 
 	showCapsuleMenu.value = true;
 	await nextTick();
-	// 入场动画
 	if (capsuleRef.value) {
-		gsap.fromTo(capsuleRef.value, { opacity: 0, scale: 0.8, y: -10 }, { opacity: 1, scale: 1, y: 0, duration: 0.3, ease: "back.out(1.7)" });
-		// 按钮依次入场
+		gsap.set(capsuleRef.value, { transformOrigin: "center top" });
+		gsap.fromTo(capsuleRef.value, {
+			opacity: 0,
+			scale: 0.3,
+			y: -30,
+			rotateX: 45,
+			filter: "blur(8px)",
+		}, {
+			opacity: 1,
+			scale: 1,
+			y: 0,
+			rotateX: 0,
+			filter: "blur(0px)",
+			duration: 0.45,
+			ease: "back.out(1.4)",
+		});
 		const buttons = capsuleRef.value.querySelectorAll(".capsule-btn");
-		gsap.fromTo(buttons, { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1, duration: 0.2, stagger: 0.05, ease: "back.out(2)", delay: 0.1 });
+		gsap.fromTo(buttons, {
+			opacity: 0,
+			scale: 0,
+			y: -10,
+		}, {
+			opacity: 1,
+			scale: 1,
+			y: 0,
+			duration: 0.3,
+			stagger: 0.04,
+			ease: "back.out(2.5)",
+			delay: 0.1,
+		});
 	}
 };
 
 // 关闭胶囊菜单（带动画）
 const closeCapsuleMenu = () => {
 	if (capsuleRef.value) {
+		// 按钮先收起
+		const buttons = capsuleRef.value.querySelectorAll(".capsule-btn");
+		gsap.to(buttons, {
+			opacity: 0,
+			scale: 0,
+			y: -10,
+			duration: 0.15,
+			stagger: 0.02,
+			ease: "power2.in",
+		});
+
+		// 整个胶囊收起
 		gsap.to(capsuleRef.value, {
 			opacity: 0,
-			scale: 0.8,
-			y: -10,
-			duration: 0.2,
-			ease: "power2.in",
+			scale: 0.3,
+			y: -30,
+			rotateX: 45,
+			filter: "blur(8px)",
+			duration: 0.25,
+			delay: 0.05,
+			ease: "back.in(1.7)",
 			onComplete: () => {
 				showCapsuleMenu.value = false;
 			},
@@ -125,9 +165,21 @@ const handleLongPressEnd = () => {
 	clearLongPressTimer();
 };
 
-// 组件卸载时清除计时器
+// 窗口失焦时关闭菜单
+const handleWindowBlur = () => {
+	if (showCapsuleMenu.value) {
+		closeCapsuleMenu();
+	}
+};
+
+onMounted(() => {
+	window.addEventListener("blur", handleWindowBlur);
+});
+
+// 组件卸载时清除计时器和事件监听
 onUnmounted(() => {
 	clearLongPressTimer();
+	window.removeEventListener("blur", handleWindowBlur);
 });
 
 // 窗口操作

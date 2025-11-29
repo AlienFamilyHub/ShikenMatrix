@@ -120,7 +120,6 @@ $max-width: 450px;
 	background: var(--bg-glass);
 	border: 1px solid var(--border-glass);
 	border-radius: 28px;
-	box-shadow: var(--shadow-card);
 
 	/* GPU 加速 - 防止 backdrop-filter 失效 */
 	isolation: isolate;
@@ -143,7 +142,6 @@ $max-width: 450px;
 	&:hover {
 		transform: translate3d(0, -4px, 0) scale(1.01);
 		background: var(--bg-glass-hover);
-		box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
 
 		.icon-glow {
 			opacity: 0.25;
@@ -208,6 +206,10 @@ $max-width: 450px;
 	height: 56px;
 	object-fit: contain;
 	filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.15));
+	/* 抗锯齿优化 */
+	image-rendering: -webkit-optimize-contrast;
+	image-rendering: high-quality;
+	transform: translateZ(0);
 }
 
 .app-icon-placeholder {
