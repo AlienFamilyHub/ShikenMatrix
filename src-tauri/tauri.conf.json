@@ -5,8 +5,8 @@
 	"identifier": "moe.tnxg.shikenmatrix",
 	"build": {
 		"beforeDevCommand": "pnpm nuxt:dev",
-		"beforeBuildCommand": "pnpm nuxt:build",
-		"devUrl": "http://localhost:3000",
+		"beforeBuildCommand": "pnpm nuxt:generate",
+		"devUrl": "http://localhost:3002",
 		"frontendDist": "../.output/public"
 	},
 	"app": {

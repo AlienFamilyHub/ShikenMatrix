@@ -3,12 +3,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { type as getOsType } from "@tauri-apps/plugin-os";
 import gsap from "gsap";
 import { nextTick, onMounted, onUnmounted, ref } from "vue";
+import SettingsPanel from "@/components/SettingsPanel.vue";
 import "@/assets/main.css";
 
 const isDragging = ref(false);
 const showCapsuleMenu = ref(false);
 const isPinned = ref(false);
 const capsuleRef = ref<HTMLElement | null>(null);
+const showSettings = ref(false);
 
 // 长按相关状态
 const longPressTimer = ref<ReturnType<typeof setTimeout> | null>(null);
@@ -201,6 +203,15 @@ const handlePin = async () => {
 	await window.setAlwaysOnTop(isPinned.value);
 };
 
+const handleSettings = () => {
+	closeCapsuleMenu();
+	showSettings.value = true;
+};
+
+const handleSettingsSave = () => {
+
+};
+
 // 点击外部关闭菜单
 const handleClickOutside = (e: MouseEvent) => {
 	if (!showCapsuleMenu.value)
@@ -272,37 +283,49 @@ const handleLongPressStart = (_e: MouseEvent | TouchEvent) => {
 </script>
 
 <template>
-	<div class="app-container" :class="{ 'platform-windows': isWindows }" @click="handleClickOutside">
-		<!-- 顶部拖拽区域 - 双击或长按打开菜单 -->
-		<div
-			class="drag-handle" :class="{ 'dragging': isDragging, 'long-pressing': isLongPressing }"
-			@mousedown="handleLongPressStart" @mouseup="handleLongPressEnd" @mouseleave="handleLongPressEnd"
-			@touchstart.passive="handleLongPressStart" @touchend="handleLongPressEnd" @touchcancel="handleLongPressEnd"
-			@dblclick.stop="handleDoubleClick" @click.stop
-		>
-			<div class="drag-indicator">
-				<span class="indicator-dot" />
-				<span class="indicator-line" />
-				<span class="indicator-dot" />
+	<div
+		class="app-container" :class="{ 'platform-windows': isWindows, 'settings-open': showSettings }"
+		@click="handleClickOutside"
+	>
+		<!-- 主内容区域 - 设置打开时会缩放和模糊 -->
+		<div class="main-content" :class="{ blurred: showSettings }">
+			<!-- 顶部拖拽区域 - 双击或长按打开菜单 -->
+			<div
+				class="drag-handle" :class="{ 'dragging': isDragging, 'long-pressing': isLongPressing }"
+				@mousedown="handleLongPressStart" @mouseup="handleLongPressEnd" @mouseleave="handleLongPressEnd"
+				@touchstart.passive="handleLongPressStart" @touchend="handleLongPressEnd"
+				@touchcancel="handleLongPressEnd" @dblclick.stop="handleDoubleClick" @click.stop
+			>
+				<div class="drag-indicator">
+					<span class="indicator-dot" />
+					<span class="indicator-line" />
+					<span class="indicator-dot" />
+				</div>
+			</div>
+
+			<!-- 胶囊操作菜单 -->
+			<div v-if="showCapsuleMenu" ref="capsuleRef" class="capsule-menu" @click.stop>
+				<button class="capsule-btn settings" title="设置" @click="handleSettings">
+					<Icon name="mdi:cog" />
+				</button>
+				<button class="capsule-btn close" title="关闭" @click="handleClose">
+					<Icon name="mdi:close" />
+				</button>
+				<button class="capsule-btn minimize" title="最小化" @click="handleMinimize">
+					<Icon name="mdi:minus" />
+				</button>
+				<button class="capsule-btn pin" :class="{ active: isPinned }" title="置顶" @click="handlePin">
+					<Icon name="mdi:pin" />
+				</button>
+			</div>
+
+			<div class="content-area">
+				<NuxtPage />
 			</div>
 		</div>
 
-		<!-- 胶囊操作菜单 -->
-		<div v-if="showCapsuleMenu" ref="capsuleRef" class="capsule-menu" @click.stop>
-			<button class="capsule-btn close" title="关闭" @click="handleClose">
-				<Icon name="mdi:close" />
-			</button>
-			<button class="capsule-btn minimize" title="最小化" @click="handleMinimize">
-				<Icon name="mdi:minus" />
-			</button>
-			<button class="capsule-btn pin" :class="{ active: isPinned }" title="置顶" @click="handlePin">
-				<Icon name="mdi:pin" />
-			</button>
-		</div>
-
-		<div class="content-area">
-			<NuxtPage />
-		</div>
+		<!-- 设置面板 -->
+		<SettingsPanel :show="showSettings" @close="showSettings = false" @save="handleSettingsSave" />
 	</div>
 </template>
 
@@ -318,6 +341,7 @@ $transition-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 	overflow: hidden;
 	/* 创建独立堆叠上下文 */
 	isolation: isolate;
+	position: relative;
 
 	&.platform-windows {
 		.drag-handle {
@@ -329,6 +353,23 @@ $transition-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 		.drag-handle.dragging {
 			cursor: grabbing;
 		}
+	}
+}
+
+// 主内容区域 - 支持缩放和模糊动画
+.main-content {
+	width: 100%;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	transition: all 0.5s cubic-bezier(0.25, 0.8, 0.25, 1);
+	transform-origin: center center;
+
+	&.blurred {
+		transform: scale(0.95);
+		filter: blur(8px);
+		opacity: 0.6;
+		pointer-events: none;
 	}
 }
 
@@ -574,6 +615,12 @@ $transition-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 		&:hover {
 			background: rgba(0, 122, 255, 0.35);
 		}
+	}
+
+	// 设置按钮
+	&.settings:hover {
+		background: rgba(120, 120, 128, 0.2);
+		color: var(--text-primary);
 	}
 }
 

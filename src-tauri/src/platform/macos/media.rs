@@ -109,7 +109,13 @@ fn update_cache_from_info(info: &NowPlayingInfo, cache: &mut MediaCache) {
         duration: info.duration.unwrap_or(0.0),
         artwork_data,
         artwork_mime_type,
-        content_item_identifier: None,
+        // 生成内容标识符：使用 bundle_id + title + album 的组合
+        content_item_identifier: Some(format!(
+            "{}:{}:{}",
+            info.bundle_identifier,
+            info.title,
+            info.album.as_deref().unwrap_or("")
+        )),
     });
 
     cache.playback_state = Some(PlaybackState {

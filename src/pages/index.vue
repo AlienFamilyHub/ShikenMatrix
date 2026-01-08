@@ -86,6 +86,12 @@ const updateWindowSize = async (debounce: boolean = true) => {
 	if (!containerRef.value)
 		return;
 
+	// 如果设置面板打开（主内容被模糊），不调整窗口大小
+	const mainContent = document.querySelector(".main-content.blurred");
+	if (mainContent) {
+		return;
+	}
+
 	try {
 		const window = getCurrentWindow();
 
@@ -178,7 +184,7 @@ const checkAndRequestPermission = async () => {
 // Data fetching
 const fetchData = async () => {
 	try {
-		// Fetch foreground window info
+		// Fetch foreground window info (后端会自动上报)
 		const windowInfo = await invoke<WindowInfo>("get_frontmost_window");
 		foregroundInfo.value = windowInfo;
 
@@ -186,6 +192,7 @@ const fetchData = async () => {
 		const metadata = await invoke<MediaMetadata | null>("get_media_metadata_cmd");
 		mediaMetadata.value = metadata;
 
+		// Fetch playback state (后端会自动上报)
 		const state = await invoke<PlaybackState | null>("get_playback_state_cmd");
 		playbackState.value = state;
 
@@ -205,6 +212,23 @@ onMounted(async () => {
 		errorMsg.value = "需要辅助功能权限，请在系统设置中授权后重启应用";
 		loading.value = false;
 		return;
+	}
+
+	// 从 localStorage 加载设置并初始化上报
+	try {
+		const saved = localStorage.getItem("owner-desktop-settings");
+		if (saved) {
+			const settings = JSON.parse(saved);
+			await invoke("update_reporter_config", {
+				config: {
+					enabled: settings.reportEnabled || false,
+					ws_url: settings.wsUrl || "",
+					token: settings.token || "",
+				},
+			});
+		}
+	} catch (error) {
+		console.error("初始化上报配置失败:", error);
 	}
 
 	fetchData();
