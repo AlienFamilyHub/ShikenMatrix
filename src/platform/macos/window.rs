@@ -3,7 +3,9 @@
 use super::super::WindowInfo;
 use super::check_accessibility_permission;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace, NSBitmapImageRep, NSBitmapImageFileType};
-use objc2_foundation::{NSSize, NSDictionary};
+use objc2_foundation::{NSSize, NSDictionary, NSRect, NSPoint, NSData};
+use objc2::rc::Retained;
+use objc2::AnyThread; // For alloc
 use core_foundation::base::TCFType;
 use core_foundation::string::CFString;
 use std::collections::HashMap;
@@ -140,31 +142,33 @@ fn get_app_icon_png(app: &NSRunningApplication) -> Option<Vec<u8>> {
     
     // 设置目标尺寸 32x32
     let target_size = NSSize::new(32.0, 32.0);
+    // 需要构建 NSRect
+    let rect = NSRect::new(NSPoint::new(0.0, 0.0), target_size);
     
     unsafe {
-        // 锁定焦点并绘制到指定尺寸
-        icon.setSize(target_size);
+        // 使用 CGImageForProposedRect 获取指定尺寸的 CGImage
+        // 这是一个极其高效的方法，它会返回（或通过绘图创建）一个符合指定尺寸的 CGImage引用
+        // 避免了像 TIFFRepresentation 那样序列化整个图标的所有分辨率数据（可能几十MB）
+        let mut proposed_rect = rect;
         
-        // 获取 TIFF 数据
-        let tiff_data = icon.TIFFRepresentation()?;
-        if tiff_data.is_empty() {
-            return None;
-        }
-        
-        // 从 TIFF 创建 NSBitmapImageRep
-        let bitmap_rep = NSBitmapImageRep::imageRepWithData(&tiff_data)?;
+        let cg_image = icon.CGImageForProposedRect_context_hints(
+            &mut proposed_rect,
+            None,
+            None
+        )?;
+
+        // 从 CGImage 创建 NSBitmapImageRep
+        let bitmap_rep_alloc = NSBitmapImageRep::alloc();
+        // initWithCGImage is an associated function, not a method
+        let bitmap_rep = NSBitmapImageRep::initWithCGImage(bitmap_rep_alloc, &cg_image);
         
         // 转换为 PNG
-        let png_data = bitmap_rep.representationUsingType_properties(
+        let data = bitmap_rep.representationUsingType_properties(
             NSBitmapImageFileType::PNG,
             &NSDictionary::new(),
-        )?;
-        
-        if png_data.is_empty() {
-            return None;
-        }
-        
-        Some(png_data.to_vec())
+        );
+
+        data.map(|d: Retained<NSData>| d.to_vec())
     }
 }
 

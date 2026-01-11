@@ -3,8 +3,9 @@
 
 use mediaremote_rs::{get_now_playing, is_playing, NowPlayingInfo};
 use serde::{Serialize, Deserialize};
-use std::sync::Mutex;
+use std::sync::{Mutex, Arc};
 use std::time::{Duration, Instant};
+use base64::{Engine as _, engine::general_purpose};
 
 /// 播放状态信息
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -30,8 +31,9 @@ pub struct MediaMetadata {
     pub album: Option<String>,
     /// 总时长（秒）
     pub duration: f64,
-    /// 封面数据 (Base64 编码)
-    pub artwork_data: Option<String>,
+    /// 封面数据 (原始二进制)
+    #[serde(skip)]
+    pub artwork_data: Option<Arc<Vec<u8>>>,
     /// 封面 MIME 类型
     pub artwork_mime_type: Option<String>,
     /// 内容标识符
@@ -75,18 +77,21 @@ fn update_cache_from_info(info: &NowPlayingInfo, cache: &mut MediaCache) {
     let key_changed = cache.artwork_key.as_ref() != Some(&new_artwork_key);
     
     // 封面数据更新逻辑：
-    // 1. 如果有新的封面数据，始终使用新数据
-    // 2. 如果歌曲没变（key 相同），复用缓存的封面
-    // 3. 如果歌曲变了但新封面为空，清空封面（避免显示旧歌曲的封面）
-    let (artwork_data, artwork_mime_type) = if info.artwork_data.is_some() {
-        // 有新的封面数据，更新 key 并使用新数据
-        cache.artwork_key = Some(new_artwork_key);
-        (info.artwork_data.clone(), info.artwork_mime_type.clone())
-    } else if !key_changed {
+    // 1. 如果歌曲没变（key 相同）且已有缓存，优先复用缓存（避免重复解码）
+    // 2. 如果有新的封面数据，解码并使用
+    // 3. 否则清空封面
+    let (artwork_data, artwork_mime_type) = if !key_changed && cache.metadata.as_ref().and_then(|m| m.artwork_data.as_ref()).is_some() {
         // 歌曲没变，复用缓存的封面
         let cached_artwork = cache.metadata.as_ref().and_then(|m| m.artwork_data.clone());
         let cached_mime = cache.metadata.as_ref().and_then(|m| m.artwork_mime_type.clone());
         (cached_artwork, cached_mime)
+    } else if let Some(base64_data) = &info.artwork_data {
+        // 有新的封面数据，解码 Base64
+        cache.artwork_key = Some(new_artwork_key);
+        match general_purpose::STANDARD.decode(base64_data) {
+            Ok(bytes) => (Some(Arc::new(bytes)), info.artwork_mime_type.clone()),
+            Err(_) => (None, None)
+        }
     } else {
         // 歌曲变了但没有封面数据，更新 key 并清空封面
         cache.artwork_key = Some(new_artwork_key);

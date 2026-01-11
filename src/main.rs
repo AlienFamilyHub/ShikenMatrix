@@ -67,15 +67,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         // Upload artwork if available and not cached
                                         if let (Some(artwork_data), Some(mime_type), Some(content_id)) = 
                                             (metadata.artwork_data.as_ref(), metadata.artwork_mime_type.as_ref(), metadata.content_item_identifier.as_ref()) {
-                                            // Decode base64 artwork data
-                                            match general_purpose::STANDARD.decode(artwork_data) {
-                                                Ok(artwork_bytes) => {
-                                                    reporter.upload_artwork(content_id.clone(), artwork_bytes, mime_type.clone());
-                                                }
-                                                Err(e) => {
-                                                    tracing::warn!("Failed to decode artwork data: {}", e);
-                                                }
-                                            }
+                                            // Artwork data is now binary (Arc<Vec<u8>>), no need to decode
+                                            reporter.upload_artwork(content_id.clone(), artwork_data.to_vec(), mime_type.clone());
                                         }
                                     }
                                     Ok(None) => {

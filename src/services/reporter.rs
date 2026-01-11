@@ -362,22 +362,8 @@ impl Reporter {
                                 let state_changed = last_playback_state.as_ref() != Some(&state);
 
                                 if metadata_changed || state_changed {
-                                    // Decode artwork if available
-                                    let artwork_bytes = if metadata_changed {
-                                        metadata.artwork_data.as_ref().and_then(|data| {
-                                            use base64::{Engine as _, engine::general_purpose};
-                                            general_purpose::STANDARD.decode(data).ok()
-                                        })
-                                    } else {
-                                        // If metadata hasn't changed, we don't need to re-decode artwork for UI update
-                                        // unless we are in a state update but want to push metadata again?
-                                        // To be safe and simple, we re-decode if we are pushing. 
-                                        // Optimization: cache decoded bytes? For now, re-decoding is okay as it happens much less frequently.
-                                        metadata.artwork_data.as_ref().and_then(|data| {
-                                            use base64::{Engine as _, engine::general_purpose};
-                                            general_purpose::STANDARD.decode(data).ok()
-                                        })
-                                    };
+                                    // Get artwork slice directly from Arc (no decoding needed)
+                                    let artwork_slice = metadata.artwork_data.as_deref().map(|v| v.as_slice());
                                     
                                     // Push media data to frontend
                                     let title = metadata.title.as_deref().unwrap_or("未知");
@@ -390,7 +376,7 @@ impl Reporter {
                                         metadata.duration, 
                                         state.elapsed_time, 
                                         state.playing,
-                                        artwork_bytes.as_deref()
+                                        artwork_slice
                                     );
                                     
                                     reporter_clone.send_media_playback(&metadata, &state);
@@ -405,17 +391,8 @@ impl Reporter {
                                                 .unwrap_or(true);
 
                                             if needs_upload {
-                                                // Decode base64 artwork data
-                                                use base64::{Engine as _, engine::general_purpose};
-                                                match general_purpose::STANDARD.decode(artwork_data) {
-                                                    Ok(artwork_bytes) => {
-                                                        reporter_clone.upload_artwork(content_id.clone(), artwork_bytes, mime_type.clone());
-                                                    }
-                                                    Err(e) => {
-                                                        let err_msg = format!("解码封面数据失败: {}", e);
-                                                        reporter_clone.push_log(1, &err_msg);
-                                                    }
-                                                }
+                                                // Send binary data directly
+                                                reporter_clone.upload_artwork(content_id.clone(), artwork_data.to_vec(), mime_type.clone());
                                             }
                                         }
                                     }

@@ -34,7 +34,8 @@ core-foundation = "0.10.1"
 objc2 = { version = "0.6.3", default-features = false }
 objc2-foundation = { version = "0.3.2", default-features = false, features = [ "NSString", "NSDictionary", "NSURL", "alloc", "NSGeometry", "objc2-core-foundation" ] }
 mediaremote-rs = "0.1.4"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = [ "NSRunningApplication", "NSWorkspace", "NSImage", "NSBitmapImageRep", "NSImageRep", "libc" ] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [ "NSRunningApplication", "NSWorkspace", "NSImage", "NSBitmapImageRep", "NSImageRep", "libc", "objc2-core-graphics", "NSGraphicsContext" ] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGImage"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = [ "processthreadsapi", "psapi", "handleapi", "winnt" ] }

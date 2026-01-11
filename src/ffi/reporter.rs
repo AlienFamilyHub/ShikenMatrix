@@ -1,6 +1,6 @@
 //! FFI functions for reporter lifecycle management
 
-use super::types::{SmConfig, SmReporter, SmStatus, SmLogCallback, SmWindowDataCallback, SmMediaDataCallback, SmLogLevel};
+use super::types::{SmConfig, SmReporter, SmStatus, SmLogCallback, SmWindowDataCallback, SmMediaDataCallback};
 use crate::services::Reporter;
 use std::ffi::CStr;
 use std::sync::{Arc, Mutex, OnceLock};
