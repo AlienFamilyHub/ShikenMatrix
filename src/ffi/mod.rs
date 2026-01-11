@@ -6,6 +6,7 @@
 //!
 //! All functions are `extern "C"` with no_mangle to ensure stable C ABI.
 
+pub mod accessibility;
 pub mod config;
 pub mod reporter;
 pub mod types;

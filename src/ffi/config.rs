@@ -19,6 +19,7 @@ pub extern "C" fn sm_config_load() -> *mut SmConfig {
         enabled: reporter_cfg.enabled,
         ws_url,
         token,
+        enable_media_reporting: reporter_cfg.enable_media_reporting,
     }))
 }
 
@@ -37,12 +38,13 @@ pub extern "C" fn sm_config_save(config: *const SmConfig) -> bool {
         return false;
     }
 
-    let (enabled, ws_url, token) = unsafe {
+    let (enabled, ws_url, token, enable_media_reporting) = unsafe {
         let cfg = &*config;
         (
             cfg.enabled,
             CStr::from_ptr(cfg.ws_url).to_string_lossy().to_string(),
             CStr::from_ptr(cfg.token).to_string_lossy().to_string(),
+            cfg.enable_media_reporting,
         )
     };
 
@@ -53,6 +55,7 @@ pub extern "C" fn sm_config_save(config: *const SmConfig) -> bool {
         enabled,
         ws_url,
         token,
+        enable_media_reporting,
     };
 
     match save_reporter_config(&reporter_config) {

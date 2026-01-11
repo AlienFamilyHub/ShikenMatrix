@@ -33,13 +33,42 @@ func sm_reporter_get_status(_ handle: UnsafeRawPointer) -> SmStatus
 @_silgen_name("sm_reporter_is_running")
 func sm_reporter_is_running() -> Bool
 
+@_silgen_name("sm_reporter_set_log_callback")
+func sm_reporter_set_log_callback(_ callback: @convention(c) (UInt8, UnsafePointer<CChar>, UInt) -> Void, _ userData: UInt)
+
+@_silgen_name("sm_reporter_set_window_callback")
+func sm_reporter_set_window_callback(_ callback: @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>, UInt32, UnsafePointer<UInt8>?, Int, UInt) -> Void, _ userData: UInt)
+
+@_silgen_name("sm_reporter_set_media_callback")
+func sm_reporter_set_media_callback(_ callback: @convention(c) (UnsafePointer<CChar>, UnsafePointer<CChar>, UnsafePointer<CChar>, Double, Double, Bool, UnsafePointer<UInt8>?, Int, UInt) -> Void, _ userData: UInt)
+
+@_silgen_name("sm_check_accessibility_permission")
+func sm_check_accessibility_permission() -> Bool
+
+@_silgen_name("sm_request_accessibility_permission")
+func sm_request_accessibility_permission() -> Bool
+
+@_silgen_name("sm_check_media_permission")
+func sm_check_media_permission() -> Bool
+
+@_silgen_name("sm_reset_media_permission_check")
+func sm_reset_media_permission_check()
+
 // MARK: - FFI Structs
+
+/// Log level enum matching Rust
+enum SmLogLevel: UInt8 {
+    case info = 0
+    case warning = 1
+    case error = 2
+}
 
 /// C-compatible struct for Config
 struct SmConfig {
     var enabled: Bool
     var wsUrl: UnsafeMutablePointer<CChar>
     var token: UnsafeMutablePointer<CChar>
+    var enableMediaReporting: Bool
 }
 
 /// C-compatible struct for Status
@@ -56,6 +85,7 @@ struct ReporterConfig: Equatable {
     var enabled: Bool
     var wsUrl: String
     var token: String
+    var enableMediaReporting: Bool
 }
 
 /// Swift model for Reporter Status
@@ -65,10 +95,58 @@ struct ReporterStatus {
     var lastError: String?
 }
 
+/// Window data from backend
+struct WindowData {
+    var title: String
+    var processName: String
+    var pid: UInt32
+    var iconData: Data?
+}
+
+/// Media data from backend
+struct MediaData {
+    var title: String
+    var artist: String
+    var album: String
+    var duration: Double
+    var elapsedTime: Double
+    var playing: Bool
+    var artworkData: Data?
+}
+
 // MARK: - Rust Bridge
 
 /// Bridge to Rust library
 class RustBridge {
+    // Callback storage (fileprivate so wrapper functions can access)
+    fileprivate static var logCallback: ((SmLogLevel, String) -> Void)?
+    fileprivate static var windowCallback: ((WindowData) -> Void)?
+    fileprivate static var mediaCallback: ((MediaData) -> Void)?
+    
+    /// Set log callback to receive formatted logs from backend
+    static func setLogCallback(_ callback: @escaping (SmLogLevel, String) -> Void) {
+        print("🔧 RustBridge: Setting log callback")
+        logCallback = callback
+        sm_reporter_set_log_callback(logCallbackWrapper, 0)
+        print("✅ RustBridge: Log callback set")
+    }
+    
+    /// Set window data callback to receive window information
+    static func setWindowCallback(_ callback: @escaping (WindowData) -> Void) {
+        print("🔧 RustBridge: Setting window callback")
+        windowCallback = callback
+        sm_reporter_set_window_callback(windowCallbackWrapper, 0)
+        print("✅ RustBridge: Window callback set")
+    }
+    
+    /// Set media data callback to receive media playback information
+    static func setMediaCallback(_ callback: @escaping (MediaData) -> Void) {
+        print("🔧 RustBridge: Setting media callback")
+        mediaCallback = callback
+        sm_reporter_set_media_callback(mediaCallbackWrapper, 0)
+        print("✅ RustBridge: Media callback set")
+    }
+    
     /// Load configuration from Rust
     static func loadConfig() -> ReporterConfig? {
         let ptr = sm_config_load()
@@ -83,7 +161,8 @@ class RustBridge {
         return ReporterConfig(
             enabled: config.enabled,
             wsUrl: wsUrl,
-            token: token
+            token: token,
+            enableMediaReporting: config.enableMediaReporting
         )
     }
 
@@ -101,7 +180,8 @@ class RustBridge {
         var smConfig = SmConfig(
             enabled: config.enabled,
             wsUrl: wsUrlPtr,
-            token: tokenPtr
+            token: tokenPtr,
+            enableMediaReporting: config.enableMediaReporting
         )
 
         return withUnsafePointer(to: &smConfig) { ptr in
@@ -123,8 +203,16 @@ class RustBridge {
         var smConfig = SmConfig(
             enabled: config.enabled,
             wsUrl: wsUrlPtr,
-            token: tokenPtr
+            token: tokenPtr,
+            enableMediaReporting: config.enableMediaReporting
         )
+
+        // Set environment variable for media reporting
+        if config.enableMediaReporting {
+            setenv("ENABLE_MEDIA_REPORTING", "1", 1)
+        } else {
+            unsetenv("ENABLE_MEDIA_REPORTING")
+        }
 
         let handle = withUnsafePointer(to: &smConfig) { ptr in
             sm_reporter_start(UnsafeRawPointer(ptr))
@@ -161,5 +249,81 @@ class RustBridge {
     /// Check if reporter is running
     static func isRunning() -> Bool {
         return sm_reporter_is_running()
+    }
+    
+    /// Check if accessibility permission is granted
+    static func checkAccessibilityPermission() -> Bool {
+        return sm_check_accessibility_permission()
+    }
+    
+    /// Request accessibility permission
+    static func requestAccessibilityPermission() -> Bool {
+        return sm_request_accessibility_permission()
+    }
+    
+    /// Check if media API is available (libmediaremote_rs.dylib loaded)
+    static func checkMediaPermission() -> Bool {
+        return sm_check_media_permission()
+    }
+    
+    /// Reset media permission check (removes blocked marker)
+    /// Call this after user has allowed the library in System Settings
+    static func resetMediaPermissionCheck() {
+        sm_reset_media_permission_check()
+    }
+}
+
+// MARK: - C Callback Wrappers
+
+/// C callback wrapper for log messages
+private func logCallbackWrapper(levelRaw: UInt8, message: UnsafePointer<CChar>, _: UInt) {
+    let level = SmLogLevel(rawValue: levelRaw) ?? .info
+    let msg = String(cString: message)
+    print("🔔 logCallbackWrapper called: [\(level)] \(msg)")
+    DispatchQueue.main.async {
+        RustBridge.logCallback?(level, msg)
+    }
+}
+
+/// C callback wrapper for window data
+private func windowCallbackWrapper(title: UnsafePointer<CChar>, processName: UnsafePointer<CChar>, pid: UInt32, iconData: UnsafePointer<UInt8>?, iconSize: Int, _: UInt) {
+    let icon: Data? = if let iconData = iconData, iconSize > 0 {
+        Data(bytes: iconData, count: iconSize)
+    } else {
+        nil
+    }
+    
+    let data = WindowData(
+        title: String(cString: title),
+        processName: String(cString: processName),
+        pid: pid,
+        iconData: icon
+    )
+    print("🔔 windowCallbackWrapper called: \(data.title) - \(data.processName), icon: \(icon != nil ? "\(iconSize) bytes" : "none")")
+    DispatchQueue.main.async {
+        RustBridge.windowCallback?(data)
+    }
+}
+
+/// C callback wrapper for media data
+private func mediaCallbackWrapper(title: UnsafePointer<CChar>, artist: UnsafePointer<CChar>, album: UnsafePointer<CChar>, duration: Double, elapsed: Double, playing: Bool, artworkData: UnsafePointer<UInt8>?, artworkSize: Int, _: UInt) {
+    let artwork: Data? = if let artworkData = artworkData, artworkSize > 0 {
+        Data(bytes: artworkData, count: artworkSize)
+    } else {
+        nil
+    }
+    
+    let data = MediaData(
+        title: String(cString: title),
+        artist: String(cString: artist),
+        album: String(cString: album),
+        duration: duration,
+        elapsedTime: elapsed,
+        playing: playing,
+        artworkData: artwork
+    )
+    print("🔔 mediaCallbackWrapper called: \(data.title) - \(data.artist), artwork: \(artwork != nil ? "\(artworkSize) bytes" : "none")")
+    DispatchQueue.main.async {
+        RustBridge.mediaCallback?(data)
     }
 }

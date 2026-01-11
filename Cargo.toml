@@ -20,7 +20,9 @@ toml = "0.9.8"
 dirs = "6.0.0"
 base64 = "0.22"
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "sync", "time", "macros", "signal"], default-features = false }
-tokio-tungstenite = { version = "0.28.0", features = [ "native-tls", "connect" ], default-features = false }
+tokio-tungstenite = { version = "0.28.0", features = [ "rustls-tls-webpki-roots", "connect" ], default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+webpki-roots = "0.26"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 url = "2.5"
 tracing = { version = "0.1", default-features = false, features = ["std"] }
@@ -31,7 +33,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 core-foundation = "0.10.1"
 objc2 = { version = "0.6.3", default-features = false }
 objc2-foundation = { version = "0.3.2", default-features = false, features = [ "NSString", "NSDictionary", "NSURL", "alloc", "NSGeometry", "objc2-core-foundation" ] }
-mediaremote-rs = "0.1"
+mediaremote-rs = "0.1.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [ "NSRunningApplication", "NSWorkspace", "NSImage", "NSBitmapImageRep", "NSImageRep", "libc" ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

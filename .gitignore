@@ -16,3 +16,5 @@ ui/icons.slint
 macos-ui/ShikenMatrix/build/
 macos-ui/**/.DS_Store
 *.DS_Store
+
+/macos-ui/rust-lib/

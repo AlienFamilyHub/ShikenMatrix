@@ -1,8 +1,8 @@
 #!/bin/bash
 # 只构建 Rust 库的脚本
 
-# 不要在错误时退出，让脚本继续运行
-set +e
+# 遇到错误时退出
+set -e
 
 # 颜色输出
 RED='\033[0;31m'
@@ -10,6 +10,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
+
+# 确保 cargo 在 PATH 中（Xcode 沙盒环境需要）
+export PATH="$HOME/.cargo/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -36,6 +39,11 @@ echo ""
 
 # 构建 Rust 库
 echo "编译 Rust 库..."
+if ! command -v cargo &> /dev/null; then
+    echo -e "${RED}❌ 找不到 cargo 命令，请确保 Rust 已安装${NC}"
+    exit 1
+fi
+
 if [ "$BUILD_MODE" = "release" ]; then
     cargo build --release
 else
@@ -53,8 +61,12 @@ echo ""
 
 # 生成 C 头文件
 echo "生成 C 头文件..."
-cbindgen --config cbindgen.toml --crate shikenmatrix --output shikenmatrix.h
-echo -e "${GREEN}✓ 生成 shikenmatrix.h${NC}"
+if ! command -v cbindgen &> /dev/null; then
+    echo -e "${YELLOW}⚠ cbindgen 未安装，跳过头文件生成${NC}"
+else
+    cbindgen --config cbindgen.toml --crate shikenmatrix --output shikenmatrix.h
+    echo -e "${GREEN}✓ 生成 shikenmatrix.h${NC}"
+fi
 echo ""
 
 # 复制文件
@@ -87,6 +99,53 @@ else
     # 使用 ad-hoc 签名（开发环境，无需证书）
     echo -e "${YELLOW}使用 ad-hoc 签名（开发模式）${NC}"
     codesign --force --sign - "$RUST_LIB_DIR/libshikenmatrix.dylib"
+fi
+
+# 移除隔离属性（开发模式）
+echo "移除隔离属性..."
+xattr -d com.apple.quarantine "$RUST_LIB_DIR/libshikenmatrix.dylib" 2>/dev/null || true
+# 也移除依赖库的隔离属性
+find "$PROJECT_ROOT/$TARGET_DIR" -name "*.dylib" -exec xattr -d com.apple.quarantine {} \; 2>/dev/null || true
+
+# 签名所有依赖的 dylib（特别是 mediaremote_rs）
+echo "签名依赖库..."
+for dylib in "$PROJECT_ROOT/$TARGET_DIR/deps"/*.dylib; do
+    if [ -f "$dylib" ]; then
+        # 尝试使用相同的签名
+        if codesign --force --sign "LG25FB2235" "$dylib" 2>/dev/null; then
+            :
+        elif codesign --force --sign "Apple Development: tianxiang_tnxg@outlook.com" "$dylib" 2>/dev/null; then
+            :
+        else
+            # ad-hoc 签名
+            codesign --force --sign - "$dylib" 2>/dev/null || true
+        fi
+    fi
+done
+echo -e "${GREEN}✓ 依赖库签名完成${NC}"
+
+# 如果在 Xcode 环境中，复制到构建目录
+if [ -n "$BUILT_PRODUCTS_DIR" ]; then
+    echo "复制到 Xcode 构建目录..."
+    mkdir -p "$BUILT_PRODUCTS_DIR/ShikenMatrix.app/Contents/Frameworks"
+    
+    # 复制主库
+    cp "$RUST_LIB_DIR/libshikenmatrix.dylib" "$BUILT_PRODUCTS_DIR/ShikenMatrix.app/Contents/Frameworks/"
+    
+    # 复制所有依赖的 dylib（包括 libmediaremote_rs.dylib）
+    echo "复制依赖库..."
+    find "$PROJECT_ROOT/$TARGET_DIR" -name "*.dylib" -not -name "libshikenmatrix.dylib" | while read lib; do
+        cp "$lib" "$BUILT_PRODUCTS_DIR/ShikenMatrix.app/Contents/Frameworks/" 2>/dev/null || true
+    done
+    
+    # 移除所有库的隔离属性并重新签名
+    echo "签名所有库文件..."
+    find "$BUILT_PRODUCTS_DIR/ShikenMatrix.app/Contents/Frameworks" -name "*.dylib" | while read lib; do
+        xattr -d com.apple.quarantine "$lib" 2>/dev/null || true
+        codesign --force --sign - "$lib" 2>/dev/null || true
+    done
+    
+    echo -e "${GREEN}✓ 已复制到应用包${NC}"
 fi
 
 echo -e "${GREEN}✓ 文件复制完成${NC}"

@@ -4,5 +4,5 @@
 pub mod config;
 pub mod reporter;
 
-pub use config::{load_config, save_reporter_config};
+pub use config::{load_config, save_reporter_config, get_log_level};
 pub use reporter::{Reporter, ReporterConfig};

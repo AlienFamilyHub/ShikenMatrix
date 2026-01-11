@@ -15,6 +15,12 @@ const CONFIG_FILE: &str = "config.toml";
 pub struct AppConfig {
     #[serde(default)]
     pub reporter: ReporterConfig,
+    #[serde(default = "default_log_level")]
+    pub log_level: String,
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
 }
 
 impl Default for ReporterConfig {
@@ -23,6 +29,7 @@ impl Default for ReporterConfig {
             enabled: false,
             ws_url: String::new(),
             token: String::new(),
+            enable_media_reporting: false,
         }
     }
 }
@@ -99,4 +106,10 @@ pub fn save_reporter_config(reporter_config: &ReporterConfig) -> Result<(), Stri
     let mut config = load_config();
     config.reporter = reporter_config.clone();
     save_config(&config)
+}
+
+/// Get log level from config
+pub fn get_log_level() -> String {
+    let config = load_config();
+    config.log_level
 }
