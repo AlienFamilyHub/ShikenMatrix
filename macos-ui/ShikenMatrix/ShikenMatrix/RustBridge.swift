@@ -168,6 +168,22 @@ class RustBridge {
     fileprivate static var logCallback: ((SmLogLevel, String) -> Void)?
     fileprivate static var windowCallback: ((WindowData) -> Void)?
     fileprivate static var mediaCallback: ((MediaData) -> Void)?
+    fileprivate static var clearStateCallback: (() -> Void)?
+    
+    // Flag to control if UI updates are enabled (for background throttling)
+    fileprivate static var updatesEnabled = true
+
+    /// Enable or disable UI updates from callbacks
+    /// Set to false when window is hidden to save memory/CPU
+    static func setUpdatesEnabled(_ enabled: Bool) {
+        updatesEnabled = enabled
+        if !enabled {
+            // When disabling, also clear cache to free memory immediately
+            ImageCache.shared.clearCache()
+            // Notify UI to clear state
+            DispatchQueue.main.async { clearStateCallback?() }
+        }
+    }
     
     /// Set log callback to receive formatted logs from backend
     static func setLogCallback(_ callback: @escaping (SmLogLevel, String) -> Void) {
@@ -175,6 +191,11 @@ class RustBridge {
         logCallback = callback
         sm_reporter_set_log_callback(logCallbackWrapper, 0)
         print("✅ RustBridge: Log callback set")
+    }
+    
+    /// Set callback to clear UI state (when entering background)
+    static func setClearStateCallback(_ callback: @escaping () -> Void) {
+        clearStateCallback = callback
     }
     
     /// Set window data callback to receive window information
@@ -199,6 +220,7 @@ class RustBridge {
         logCallback = nil
         windowCallback = nil
         mediaCallback = nil
+        clearStateCallback = nil
         // Set dummy C callbacks to prevent crashes from dangling pointers
         sm_reporter_set_log_callback({ _, _, _ in }, 0)
         sm_reporter_set_window_callback({ _, _, _, _, _, _ in }, 0)
@@ -336,6 +358,9 @@ class RustBridge {
 
 /// C callback wrapper for log messages
 private func logCallbackWrapper(levelRaw: UInt8, message: UnsafePointer<CChar>, _: UInt) {
+    // Skip if updates disabled
+    guard RustBridge.updatesEnabled else { return }
+    
     let level = SmLogLevel(rawValue: levelRaw) ?? .info
     let msg = String(cString: message)
     DispatchQueue.main.async {
@@ -345,6 +370,9 @@ private func logCallbackWrapper(levelRaw: UInt8, message: UnsafePointer<CChar>, 
 
 /// C callback wrapper for window data
 private func windowCallbackWrapper(title: UnsafePointer<CChar>, processName: UnsafePointer<CChar>, pid: UInt32, iconData: UnsafePointer<UInt8>?, iconSize: Int, _: UInt) {
+    // Skip if updates disabled to save significant memory/CPU
+    guard RustBridge.updatesEnabled else { return }
+
     // We ignore iconData from Rust because it is now null/empty to save bandwidth
     // Instead we fetch the icon natively using the PID
     
@@ -364,6 +392,9 @@ private func windowCallbackWrapper(title: UnsafePointer<CChar>, processName: Uns
 
 /// C callback wrapper for media data
 private func mediaCallbackWrapper(title: UnsafePointer<CChar>, artist: UnsafePointer<CChar>, album: UnsafePointer<CChar>, duration: Double, elapsed: Double, playing: Bool, artworkData: UnsafePointer<UInt8>?, artworkSize: Int, _: UInt) {
+    // Skip if updates disabled
+    guard RustBridge.updatesEnabled else { return }
+
     // Only copy artwork if present and reasonable size (< 2MB)
     let artwork: Data?
     if let artworkData = artworkData, artworkSize > 0, artworkSize < 2_000_000 {

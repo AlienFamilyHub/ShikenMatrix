@@ -101,6 +101,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         
         // Hide window on startup - start in tray mode
         window.setIsVisible(false)
+        // Disable UI updates initially to save resources in tray mode
+        RustBridge.setUpdatesEnabled(false)
         
         self.window = window
         statusBarManager?.setWindow(window)
@@ -110,6 +112,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // 重用现有窗口，不创建新窗口
         if !flag, let window = window {
             window.setIsVisible(true)
+            RustBridge.setUpdatesEnabled(true)
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -118,17 +121,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     
     // Intercept window close to hide instead of quit
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        print("❎ Window close requested. Minimizing to tray.")
         hideWindow()
         return false  // Don't actually close the window
     }
 
     func showWindow() {
-        window?.setIsVisible(true)
-        window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if let window = window {
+            print("📈 Window shown: Re-enabling UI updates.")
+            window.setIsVisible(true)
+            // Re-enable updates when window is shown
+            RustBridge.setUpdatesEnabled(true)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     func hideWindow() {
+        print("📉 Window hidden: Disabling UI updates and clearing cache...")
+        // Disable updates when window is hidden to free memory
+        RustBridge.setUpdatesEnabled(false)
         window?.setIsVisible(false)
     }
 

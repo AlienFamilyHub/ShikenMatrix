@@ -378,13 +378,20 @@ struct ContentView: View {
     
     private func setupCallbacks() {
         RustBridge.setLogCallback { l, m in
-            DispatchQueue.main.async { [self] in self.addLog(m, level: l == .info ? .info : (l == .warning ? .warning : .error)) }
+            addLog(m, level: l == .error ? .error : (l == .warning ? .warning : .info))
         }
+        
+        RustBridge.setClearStateCallback {
+            self.currentWindow = nil
+            self.currentMedia = nil
+        }
+        
         RustBridge.setWindowCallback { w in
-            DispatchQueue.main.async { [self] in self.currentWindow = w }
+            self.currentWindow = w
         }
+        
         RustBridge.setMediaCallback { m in
-            DispatchQueue.main.async { [self] in self.currentMedia = m }
+            self.currentMedia = m
         }
     }
 
