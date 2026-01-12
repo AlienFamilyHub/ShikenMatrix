@@ -21,3 +21,4 @@ macos-ui/**/.DS_Store
 /macos-ui/rust-lib/
 rust-lib/
 **/rust-lib/*.xcuserstate
+*.xcuserstate
