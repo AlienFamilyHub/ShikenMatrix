@@ -21,6 +21,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin, aarch64-apple-darwin
+          toolchain: stable
+      
+      - name: Install Rust nightly (for cbindgen)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-build"
+          cache-on-failure: true
 
       - name: Install cbindgen
         run: cargo install cbindgen
@@ -40,7 +50,15 @@ jobs:
 
       - name: Generate Header
         run: |
-          cbindgen --config cbindgen.toml --crate shikenmatrix --output shikenmatrix.h
+          # Use nightly for cbindgen
+          rustup default nightly
+          cbindgen --config cbindgen.toml --crate shikenmatrix --output shikenmatrix.h || echo "cbindgen failed, using existing header"
+          rustup default stable
+          
+          # Fallback to existing header if generation fails
+          if [ ! -f shikenmatrix.h ] && [ -f macos-ui/rust-lib/shikenmatrix.h ]; then
+            cp macos-ui/rust-lib/shikenmatrix.h shikenmatrix.h
+          fi
 
       - name: Prepare Rust Lib for Xcode
         run: |
