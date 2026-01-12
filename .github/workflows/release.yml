@@ -1,0 +1,80 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build macOS App
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin, aarch64-apple-darwin
+
+      - name: Install cbindgen
+        run: cargo install cbindgen
+
+      - name: Build Rust Library (Universal)
+        run: |
+          # Build for both architectures
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          
+          # Create universal binary using lipo
+          mkdir -p target/universal/release
+          lipo -create \
+            target/x86_64-apple-darwin/release/libshikenmatrix.dylib \
+            target/aarch64-apple-darwin/release/libshikenmatrix.dylib \
+            -output target/universal/release/libshikenmatrix.dylib
+
+      - name: Generate Header
+        run: |
+          cbindgen --config cbindgen.toml --crate shikenmatrix --output shikenmatrix.h
+
+      - name: Prepare Rust Lib for Xcode
+        run: |
+          mkdir -p macos-ui/rust-lib
+          cp target/universal/release/libshikenmatrix.dylib macos-ui/rust-lib/
+          cp shikenmatrix.h macos-ui/rust-lib/
+          
+          # Fix install name
+          install_name_tool -id "@rpath/libshikenmatrix.dylib" macos-ui/rust-lib/libshikenmatrix.dylib
+
+      - name: Build Xcode Project
+        run: |
+          cd macos-ui/ShikenMatrix
+          xcodebuild build \
+            -project ShikenMatrix.xcodeproj \
+            -scheme ShikenMatrix \
+            -configuration Release \
+            -derivedDataPath ../build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package Application
+        run: |
+          cd macos-ui/build/Build/Products/Release
+          # Create a nice DMG or just zip the .app
+          # Using zip for simplicity
+          zip -r ShikenMatrix.zip ShikenMatrix.app
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: macos-ui/build/Build/Products/Release/ShikenMatrix.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
