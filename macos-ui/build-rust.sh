@@ -164,6 +164,3 @@ fi
 echo ""
 echo "库文件大小:"
 ls -lh "$RUST_LIB_DIR/libshikenmatrix.dylib" | awk '{print "  " $5}'
-echo ""
-echo "下一步: 在 Xcode 中 Clean Build Folder (Cmd+Shift+K)，然后 Run (Cmd+R)"
-echo ""

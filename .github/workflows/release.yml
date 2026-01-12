@@ -23,52 +23,24 @@ jobs:
       - name: Install Rust nightly (for cbindgen)
         uses: dtolnay/rust-toolchain@nightly
 
-      - name: Add Rust targets
-        run: |
-          rustup target add aarch64-apple-darwin
-
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: "release-build"
           cache-on-failure: true
 
-      - name: Install cbindgen
-        run: cargo install cbindgen
-
-      - name: Build Rust Library (Universal)
+      - name: Build Rust Library
         run: |
-          # Build for both architectures
-          cargo build --release --target x86_64-apple-darwin
-          cargo build --release --target aarch64-apple-darwin
-          
-          # Create universal binary using lipo
-          mkdir -p target/universal/release
-          lipo -create \
-            target/x86_64-apple-darwin/release/libshikenmatrix.dylib \
-            target/aarch64-apple-darwin/release/libshikenmatrix.dylib \
-            -output target/universal/release/libshikenmatrix.dylib
-
-      - name: Generate Header
-        run: |
-          # Use nightly for cbindgen
-          rustup default nightly
-          cbindgen --config cbindgen.toml --crate shikenmatrix --output shikenmatrix.h || echo "cbindgen failed, using existing header"
-          rustup default stable
-          
-          # Fallback to existing header if generation fails
-          if [ ! -f shikenmatrix.h ] && [ -f macos-ui/rust-lib/shikenmatrix.h ]; then
-            cp macos-ui/rust-lib/shikenmatrix.h shikenmatrix.h
-          fi
+          cd macos-ui
+          chmod +x build-rust.sh
+          ./build-rust.sh
 
       - name: Prepare Rust Lib for Xcode
         run: |
-          mkdir -p macos-ui/rust-lib
-          cp target/universal/release/libshikenmatrix.dylib macos-ui/rust-lib/
-          cp shikenmatrix.h macos-ui/rust-lib/
-          
-          # Fix install name
-          install_name_tool -id "@rpath/libshikenmatrix.dylib" macos-ui/rust-lib/libshikenmatrix.dylib
+          # build-rust.sh already handles everything
+          # Just verify the files exist
+          ls -lh macos-ui/rust-lib/libshikenmatrix.dylib
+          ls -lh macos-ui/rust-lib/shikenmatrix.h || echo "Header not found, will use fallback"
 
       - name: Build Xcode Project
         run: |
