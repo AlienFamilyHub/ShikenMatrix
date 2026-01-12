@@ -20,4 +20,4 @@ macos-ui/**/.DS_Store
 # Rust library build artifacts for macOS
 /macos-ui/rust-lib/
 rust-lib/
-**/rust-lib/
+**/rust-lib/*.xcuserstate
