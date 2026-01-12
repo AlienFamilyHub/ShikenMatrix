@@ -414,14 +414,8 @@ impl Reporter {
                                                     .map(|urls| !urls.contains_key(content_id))
                                                     .unwrap_or(true);
 
-                                                // Limit artwork size to 2MB to prevent memory issues
-                                                const MAX_ARTWORK_SIZE: usize = 2_000_000;
-
-                                                if needs_upload && artwork_data.len() < MAX_ARTWORK_SIZE {
-                                                    // Clone only if reasonable size
+                                                if needs_upload {
                                                     reporter_clone.upload_artwork(content_id.clone(), artwork_data.to_vec(), mime_type.clone());
-                                                } else if artwork_data.len() >= MAX_ARTWORK_SIZE {
-                                                    reporter_clone.push_log(1, &format!("封面太大 ({} bytes)，跳过上传", artwork_data.len()));
                                                 }
                                             }
                                         }
