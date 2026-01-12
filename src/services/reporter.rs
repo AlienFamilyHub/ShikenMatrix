@@ -30,6 +30,7 @@ enum ReporterMessage {
     WindowInfo(WindowInfoMessage),
     MediaPlayback(MediaPlaybackMessage),
     UploadArtwork { content_item_identifier: String, artwork_data: Vec<u8>, mime_type: String },
+    Shutdown,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -130,6 +131,7 @@ pub struct Reporter {
     window_callback: Arc<RwLock<WindowDataCallback>>,
     media_callback: Arc<RwLock<MediaDataCallback>>,
     callback_user_data: Arc<AtomicUsize>,
+    is_running: Arc<AtomicBool>,
 }
 
 impl Reporter {
@@ -137,16 +139,23 @@ impl Reporter {
         let config = Arc::new(RwLock::new(config));
         let artwork_urls = Arc::new(RwLock::new(HashMap::new()));
         let is_connected = Arc::new(AtomicBool::new(false));
+        let is_running = Arc::new(AtomicBool::new(true));
+        
         let (tx, rx) = mpsc::unbounded_channel();
 
         let config_clone = config.clone();
         let artwork_urls_clone = artwork_urls.clone();
         let is_connected_clone = is_connected.clone();
+        let is_running_clone = is_running.clone();
         
         // Use std::thread to create independent runtime (avoids FFI context issues)
+        // Use current_thread runtime to minimize memory usage (saves ~10 threads vs multi_thread)
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
-            rt.block_on(Self::run_reporter(config_clone, rx, artwork_urls_clone, is_connected_clone));
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to create tokio runtime");
+            rt.block_on(Self::run_reporter(config_clone, rx, artwork_urls_clone, is_connected_clone, is_running_clone));
         });
 
         let reporter = Self {
@@ -160,6 +169,7 @@ impl Reporter {
             window_callback: Arc::new(RwLock::new(None)),
             media_callback: Arc::new(RwLock::new(None)),
             callback_user_data: Arc::new(AtomicUsize::new(0)),
+            is_running,
         };
 
         // Start window monitoring in a separate thread
@@ -173,14 +183,16 @@ impl Reporter {
         let config = Arc::new(RwLock::new(config));
         let artwork_urls = Arc::new(RwLock::new(HashMap::new()));
         let is_connected = Arc::new(AtomicBool::new(false));
+        let is_running = Arc::new(AtomicBool::new(true));
         let (tx, rx) = mpsc::unbounded_channel();
 
         let config_clone = config.clone();
         let artwork_urls_clone = artwork_urls.clone();
         let is_connected_clone = is_connected.clone();
+        let is_running_clone = is_running.clone();
         
         handle.spawn(async move {
-            Self::run_reporter(config_clone, rx, artwork_urls_clone, is_connected_clone).await;
+            Self::run_reporter(config_clone, rx, artwork_urls_clone, is_connected_clone, is_running_clone).await;
         });
 
         let reporter = Self {
@@ -194,12 +206,19 @@ impl Reporter {
             window_callback: Arc::new(RwLock::new(None)),
             media_callback: Arc::new(RwLock::new(None)),
             callback_user_data: Arc::new(AtomicUsize::new(0)),
+            is_running,
         };
 
         // Start window monitoring in a separate thread
         reporter.start_window_monitoring();
 
         reporter
+    }
+    
+    pub fn stop(&self) {
+        self.is_running.store(false, Ordering::Relaxed);
+        // Send shutdown message to break out of tokio::select! in run_reporter
+        let _ = self.tx.send(ReporterMessage::Shutdown);
     }
     
     /// Set callback for logs
@@ -251,11 +270,9 @@ impl Reporter {
                 let c_title = std::ffi::CString::new(title).unwrap();
                 let c_process = std::ffi::CString::new(process_name).unwrap();
                 
-                let (icon_ptr, icon_len) = if let Some(data) = icon_data {
-                    (data.as_ptr(), data.len())
-                } else {
-                    (std::ptr::null(), 0)
-                };
+                // Don't send icon data to frontend to save memory/copy overhead
+                // Frontend can fetch icon directly using PID if needed
+                let (icon_ptr, icon_len) = (std::ptr::null(), 0);
                 
                 info!("📤 Calling window callback with user_data={}", user_data);
                 cb(c_title.as_ptr(), c_process.as_ptr(), pid, icon_ptr, icon_len, user_data);
@@ -305,6 +322,12 @@ impl Reporter {
             let mut last_playback_state: Option<crate::platform::PlaybackState> = None;
             
             loop {
+                // Check running status
+                if !reporter_clone.is_running.load(Ordering::Relaxed) {
+                    reporter_clone.push_log(0, "监控线程正在退出...");
+                    break;
+                }
+                
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 check_count += 1;
                 
@@ -322,87 +345,94 @@ impl Reporter {
                 
                 #[cfg(target_os = "macos")]
                 {
-                    // Monitor window info
-                    match crate::platform::macos::get_frontmost_window_info_sync() {
-                        Ok(window_info) => {
-                            if last_window_info.as_ref() != Some(&window_info) {
-                                let log_msg = format!("获取到窗口信息: {} ({})", window_info.title, window_info.process_name);
-                                reporter_clone.push_log(0, &log_msg);
-                                
-                                // Push window data to frontend (with icon if available)
-                                reporter_clone.push_window_data(
-                                    &window_info.title, 
-                                    &window_info.process_name, 
-                                    window_info.pid as u32,
-                                    window_info.icon_data.as_deref()
-                                );
-                                
-                                reporter_clone.send_window_info(&window_info);
-                                permission_warned = false; // Reset warning flag on success
-                                
-                                last_window_info = Some(window_info);
-                            }
-                        }
-                        Err(e) => {
-                            if !permission_warned {
-                                let err_msg = format!("获取窗口信息失败: {}", e);
-                                reporter_clone.push_log(1, &err_msg);
-                                permission_warned = true; // Only warn once
-                            }
-                        }
-                    }
-                    
-                    // Monitor media playback (every second)
-                    // DISABLED by default - set ENABLE_MEDIA_REPORTING=1 to enable
-                    if std::env::var("ENABLE_MEDIA_REPORTING").unwrap_or_default() == "1" {
-                        if let Ok(Some(metadata)) = crate::platform::macos::get_media_metadata() {
-                            if let Ok(Some(state)) = crate::platform::macos::get_playback_state() {
-                                
-                                let metadata_changed = last_media_metadata.as_ref() != Some(&metadata);
-                                let state_changed = last_playback_state.as_ref() != Some(&state);
-
-                                if metadata_changed || state_changed {
-                                    // Get artwork slice directly from Arc (no decoding needed)
-                                    let artwork_slice = metadata.artwork_data.as_deref().map(|v| v.as_slice());
+                    objc2::rc::autoreleasepool(|_| {
+                        // Monitor window info
+                        match crate::platform::macos::get_frontmost_window_info_sync() {
+                            Ok(window_info) => {
+                                if last_window_info.as_ref() != Some(&window_info) {
+                                    let log_msg = format!("获取到窗口信息: {} ({})", window_info.title, window_info.process_name);
+                                    reporter_clone.push_log(0, &log_msg);
                                     
-                                    // Push media data to frontend
-                                    let title = metadata.title.as_deref().unwrap_or("未知");
-                                    let artist = metadata.artist.as_deref().unwrap_or("未知");
-                                    let album = metadata.album.as_deref().unwrap_or("未知");
-                                    reporter_clone.push_media_data(
-                                        title, 
-                                        artist, 
-                                        album, 
-                                        metadata.duration, 
-                                        state.elapsed_time, 
-                                        state.playing,
-                                        artwork_slice
+                                    // Push window data to frontend (with icon if available)
+                                    reporter_clone.push_window_data(
+                                        &window_info.title, 
+                                        &window_info.process_name, 
+                                        window_info.pid as u32,
+                                        window_info.icon_data.as_deref()
                                     );
                                     
-                                    reporter_clone.send_media_playback(&metadata, &state);
-
-                                    // Upload artwork if available and not cached (only if metadata changed)
-                                    if metadata_changed {
-                                        if let (Some(artwork_data), Some(mime_type), Some(content_id)) =
-                                            (metadata.artwork_data.as_ref(), metadata.artwork_mime_type.as_ref(), metadata.content_item_identifier.as_ref()) {
-                                            // Check if already cached
-                                            let needs_upload = reporter_clone.artwork_urls.read()
-                                                .map(|urls| !urls.contains_key(content_id))
-                                                .unwrap_or(true);
-
-                                            if needs_upload {
-                                                // Send binary data directly
-                                                reporter_clone.upload_artwork(content_id.clone(), artwork_data.to_vec(), mime_type.clone());
-                                            }
-                                        }
-                                    }
+                                    reporter_clone.send_window_info(&window_info);
+                                    permission_warned = false; // Reset warning flag on success
                                     
-                                    last_media_metadata = Some(metadata);
-                                    last_playback_state = Some(state);
+                                    last_window_info = Some(window_info);
+                                }
+                            }
+                            Err(e) => {
+                                if !permission_warned {
+                                    let err_msg = format!("获取窗口信息失败: {}", e);
+                                    reporter_clone.push_log(1, &err_msg);
+                                    permission_warned = true; // Only warn once
                                 }
                             }
                         }
-                    }
+                    
+                        // Monitor media playback (every second)
+                        // DISABLED by default - set ENABLE_MEDIA_REPORTING=1 to enable
+                        if std::env::var("ENABLE_MEDIA_REPORTING").unwrap_or_default() == "1" {
+                            if let Ok(Some(metadata)) = crate::platform::macos::get_media_metadata() {
+                                if let Ok(Some(state)) = crate::platform::macos::get_playback_state() {
+                                    
+                                    let metadata_changed = last_media_metadata.as_ref() != Some(&metadata);
+                                    let state_changed = last_playback_state.as_ref() != Some(&state);
+
+                                    if metadata_changed || state_changed {
+                                        // Get artwork slice directly from Arc (no decoding needed)
+                                        let artwork_slice = metadata.artwork_data.as_deref().map(|v| v.as_slice());
+                                        
+                                        // Push media data to frontend
+                                        let title = metadata.title.as_deref().unwrap_or("未知");
+                                        let artist = metadata.artist.as_deref().unwrap_or("未知");
+                                        let album = metadata.album.as_deref().unwrap_or("未知");
+                                        reporter_clone.push_media_data(
+                                            title, 
+                                            artist, 
+                                            album, 
+                                            metadata.duration, 
+                                            state.elapsed_time, 
+                                            state.playing,
+                                            artwork_slice
+                                        );
+                                        
+                                        reporter_clone.send_media_playback(&metadata, &state);
+
+                                        // Upload artwork if available and not cached (only if metadata changed)
+                                        if metadata_changed {
+                                            if let (Some(artwork_data), Some(mime_type), Some(content_id)) =
+                                                (metadata.artwork_data.as_ref(), metadata.artwork_mime_type.as_ref(), metadata.content_item_identifier.as_ref()) {
+                                                // Check if already cached
+                                                let needs_upload = reporter_clone.artwork_urls.read()
+                                                    .map(|urls| !urls.contains_key(content_id))
+                                                    .unwrap_or(true);
+
+                                                // Limit artwork size to 2MB to prevent memory issues
+                                                const MAX_ARTWORK_SIZE: usize = 2_000_000;
+
+                                                if needs_upload && artwork_data.len() < MAX_ARTWORK_SIZE {
+                                                    // Clone only if reasonable size
+                                                    reporter_clone.upload_artwork(content_id.clone(), artwork_data.to_vec(), mime_type.clone());
+                                                } else if artwork_data.len() >= MAX_ARTWORK_SIZE {
+                                                    reporter_clone.push_log(1, &format!("封面太大 ({} bytes)，跳过上传", artwork_data.len()));
+                                                }
+                                            }
+                                        }
+                                        
+                                        last_media_metadata = Some(metadata);
+                                        last_playback_state = Some(state);
+                                    }
+                                }
+                            }
+                        }
+                    });
                 }
                 
                 #[cfg(target_os = "windows")]
@@ -434,12 +464,19 @@ impl Reporter {
         mut rx: mpsc::UnboundedReceiver<ReporterMessage>,
         artwork_urls: Arc<RwLock<HashMap<String, String>>>,
         is_connected: Arc<AtomicBool>,
+        is_running: Arc<AtomicBool>,
     ) {
         let mut reconnect_attempts = 0;
         const MAX_RECONNECT_ATTEMPTS: u32 = 5;
         const RECONNECT_INTERVAL: u64 = 3000;
 
         loop {
+            // Check if stop requested
+            if !is_running.load(Ordering::Relaxed) {
+                info!("Reporter stopping (run_reporter loop)");
+                break;
+            }
+
             let cfg = config.read().unwrap().clone();
 
             if !cfg.enabled {
@@ -487,6 +524,7 @@ impl Reporter {
                     reconnect_attempts = 0;
 
                     let (mut write, mut read) = ws_stream.split();
+                    let is_connected_clone_inner = is_connected.clone();
 
                     loop {
                         tokio::select! {
@@ -523,6 +561,13 @@ impl Reporter {
                                                 info!("Artwork uploaded: {}", content_item_identifier);
                                             }
                                         }
+                                    }
+                                    ReporterMessage::Shutdown => {
+                                        info!("Reporter shutdown signal received in run loop");
+                                        is_connected_clone_inner.store(false, Ordering::Relaxed);
+                                        // Close WebSocket connection cleanly if possible
+                                        let _ = write.close().await;
+                                        return; // Exit the run_reporter function completely
                                     }
                                 }
                             }

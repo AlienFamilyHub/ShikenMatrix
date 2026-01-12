@@ -7,5 +7,7 @@
 		<key>NSExceptionDomains</key>
 		<dict/>
 	</dict>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>ShikenMatrix 需要发送通知以告知您应用状态更新</string>
 </dict>
 </plist>

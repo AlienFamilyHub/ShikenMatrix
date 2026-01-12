@@ -6,6 +6,52 @@
 //
 
 import Foundation
+import AppKit
+
+// MARK: - Image Cache (防止反复解码)
+class ImageCache {
+    static let shared = ImageCache()
+    private let cache = NSCache<NSString, NSImage>()
+    
+    init() {
+        cache.countLimit = 50 // Limit to 50 items
+    }
+    
+    /// Get image from cache or decode from data
+    func image(for key: String, from data: Data?) -> NSImage? {
+        let nsKey = key as NSString
+        if let cached = cache.object(forKey: nsKey) {
+            return cached
+        }
+        
+        guard let data = data, let image = NSImage(data: data) else {
+            return nil
+        }
+        
+        cache.setObject(image, forKey: nsKey)
+        return image
+    }
+    
+    /// Get window icon from cache or System API
+    func windowIcon(for pid: UInt32, key: String) -> NSImage? {
+        let nsKey = key as NSString
+        if let cached = cache.object(forKey: nsKey) {
+            return cached
+        }
+        
+        // Fetch from system API
+        if let app = NSRunningApplication(processIdentifier: pid_t(pid)), let icon = app.icon {
+            cache.setObject(icon, forKey: nsKey)
+            return icon
+        }
+        
+        return nil
+    }
+    
+    func clearCache() {
+        cache.removeAllObjects()
+    }
+}
 
 // MARK: - FFI Declarations
 
@@ -100,7 +146,7 @@ struct WindowData {
     var title: String
     var processName: String
     var pid: UInt32
-    var iconData: Data?
+    var icon: NSImage?
 }
 
 /// Media data from backend
@@ -292,7 +338,6 @@ class RustBridge {
 private func logCallbackWrapper(levelRaw: UInt8, message: UnsafePointer<CChar>, _: UInt) {
     let level = SmLogLevel(rawValue: levelRaw) ?? .info
     let msg = String(cString: message)
-    print("🔔 logCallbackWrapper called: [\(level)] \(msg)")
     DispatchQueue.main.async {
         RustBridge.logCallback?(level, msg)
     }
@@ -300,19 +345,18 @@ private func logCallbackWrapper(levelRaw: UInt8, message: UnsafePointer<CChar>, 
 
 /// C callback wrapper for window data
 private func windowCallbackWrapper(title: UnsafePointer<CChar>, processName: UnsafePointer<CChar>, pid: UInt32, iconData: UnsafePointer<UInt8>?, iconSize: Int, _: UInt) {
-    let icon: Data? = if let iconData = iconData, iconSize > 0 {
-        Data(bytes: iconData, count: iconSize)
-    } else {
-        nil
-    }
+    // We ignore iconData from Rust because it is now null/empty to save bandwidth
+    // Instead we fetch the icon natively using the PID
     
+    let icon = ImageCache.shared.windowIcon(for: pid, key: "window-\(pid)")
+
     let data = WindowData(
         title: String(cString: title),
         processName: String(cString: processName),
         pid: pid,
-        iconData: icon
+        icon: icon
     )
-    print("🔔 windowCallbackWrapper called: \(data.title) - \(data.processName), icon: \(icon != nil ? "\(iconSize) bytes" : "none")")
+
     DispatchQueue.main.async {
         RustBridge.windowCallback?(data)
     }
@@ -320,12 +364,14 @@ private func windowCallbackWrapper(title: UnsafePointer<CChar>, processName: Uns
 
 /// C callback wrapper for media data
 private func mediaCallbackWrapper(title: UnsafePointer<CChar>, artist: UnsafePointer<CChar>, album: UnsafePointer<CChar>, duration: Double, elapsed: Double, playing: Bool, artworkData: UnsafePointer<UInt8>?, artworkSize: Int, _: UInt) {
-    let artwork: Data? = if let artworkData = artworkData, artworkSize > 0 {
-        Data(bytes: artworkData, count: artworkSize)
+    // Only copy artwork if present and reasonable size (< 2MB)
+    let artwork: Data?
+    if let artworkData = artworkData, artworkSize > 0, artworkSize < 2_000_000 {
+        artwork = Data(bytes: artworkData, count: artworkSize)
     } else {
-        nil
+        artwork = nil
     }
-    
+
     let data = MediaData(
         title: String(cString: title),
         artist: String(cString: artist),
@@ -335,7 +381,7 @@ private func mediaCallbackWrapper(title: UnsafePointer<CChar>, artist: UnsafePoi
         playing: playing,
         artworkData: artwork
     )
-    print("🔔 mediaCallbackWrapper called: \(data.title) - \(data.artist), artwork: \(artwork != nil ? "\(artworkSize) bytes" : "none")")
+
     DispatchQueue.main.async {
         RustBridge.mediaCallback?(data)
     }

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppKit
+import UserNotifications
 
 @main
 struct ShikenMatrixApp: App {
@@ -26,8 +27,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var window: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Set activation policy to accessory to hide dock icon
-        NSApp.setActivationPolicy(.accessory)
+        // 防止重复初始化
+        guard window == nil else { return }
+        
+        // Set activation policy to regular to show dock icon (change back to .accessory to hide)
+        NSApp.setActivationPolicy(.regular)
+        
+        // Request notification permission
+        requestNotificationPermission()
         
         // Create status bar manager first
         statusBarManager = StatusBarManager()
@@ -39,13 +46,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         showStartupNotification()
     }
     
+    private func requestNotificationPermission() {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+            if let error = error {
+                print("通知权限请求失败: \(error.localizedDescription)")
+            }
+        }
+    }
+    
     private func showStartupNotification() {
-        let notification = NSUserNotification()
-        notification.title = "ShikenMatrix"
-        notification.informativeText = "应用已在系统托盘启动，点击托盘图标打开设置"
-        notification.soundName = nil
+        let center = UNUserNotificationCenter.current()
         
-        NSUserNotificationCenter.default.deliver(notification)
+        let content = UNMutableNotificationContent()
+        content.title = "ShikenMatrix"
+        content.body = "应用已在系统托盘启动，点击托盘图标打开设置"
+        
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil // Deliver immediately
+        )
+        
+        center.add(request) { error in
+            if let error = error {
+                print("通知发送失败: \(error.localizedDescription)")
+            }
+        }
     }
     
     private func createMainWindow() {
@@ -69,6 +96,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.level = .normal
         window.collectionBehavior = [.canJoinAllSpaces]
         
+        // Disable window restoration to avoid className=null warnings
+        window.isRestorable = false
+        
         // Hide window on startup - start in tray mode
         window.setIsVisible(false)
         
@@ -77,8 +107,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
-            showWindow()
+        // 重用现有窗口，不创建新窗口
+        if !flag, let window = window {
+            window.setIsVisible(true)
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
         }
         return true
     }

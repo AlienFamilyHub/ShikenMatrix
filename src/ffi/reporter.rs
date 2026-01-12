@@ -133,8 +133,8 @@ pub extern "C" fn sm_reporter_start(config: *const SmConfig) -> *mut SmReporter 
 pub extern "C" fn sm_reporter_stop(_handle: *mut SmReporter) -> bool {
     // We ignore the actual handle value and just check if a reporter is running
     let mut guard = GLOBAL_REPORTER.lock().unwrap();
-    if guard.is_some() {
-        *guard = None;
+    if let Some(reporter) = guard.take() {
+        reporter.stop(); 
         info!("Reporter stopped successfully");
         true
     } else {

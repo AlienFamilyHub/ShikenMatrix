@@ -126,7 +126,7 @@ struct ContentView: View {
     // MARK: - Left Panel: Monitoring (Core)
     private var monitoringSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("LIVE MONITOR", systemImage: "activity.heartbeat")
+            Label("LIVE MONITOR", systemImage: "waveform.path.ecg")
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.secondary)
             
@@ -139,8 +139,8 @@ struct ContentView: View {
                 if let window = currentWindow {
                     MonitorCard {
                         HStack(alignment: .top, spacing: 10) {
-                            // Icon
-                            if let data = window.iconData, let nsImage = NSImage(data: data) {
+                            // Icon - Use directly from WindowData (fetched via AppKit)
+                            if let nsImage = window.icon {
                                 Image(nsImage: nsImage)
                                     .resizable()
                                     .frame(width: 32, height: 32)
@@ -174,8 +174,8 @@ struct ContentView: View {
                 if let media = currentMedia {
                     MonitorCard {
                         HStack(alignment: .center, spacing: 10) {
-                            // Artwork
-                            if let data = media.artworkData, let nsImage = NSImage(data: data) {
+                            // Artwork - 使用缓存的图片，避免反复解码
+                            if let data = media.artworkData, let nsImage = ImageCache.shared.image(for: "artwork-\(media.title)\(media.artist)", from: data) {
                                 Image(nsImage: nsImage)
                                     .resizable()
                                     .aspectRatio(contentMode: .fill)
@@ -368,6 +368,9 @@ struct ContentView: View {
     // MARK: - Logic Handlers (Unchanged)
     // 为了节省篇幅，核心逻辑代码与上一个版本保持一致，此处进行连接
     private func setupApp() {
+        // 防止重复初始化
+        guard statusTimer == nil else { return }
+        
         loadConfig(); checkAccessibilityPermission(); startStatusUpdates(); startLogCleanup()
         if RustBridge.isRunning() { setupCallbacks() }
         if config.enableMediaReporting { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { checkMediaPermission() } }
@@ -423,18 +426,31 @@ struct ContentView: View {
         stopStatusUpdates()
         // Clear FFI callbacks to prevent memory leaks
         RustBridge.clearCallbacks()
+        // Clear image cache
+        ImageCache.shared.clearCache()
         // Clear handle
         if let handle = reporterHandle {
             _ = RustBridge.stopReporter(handle)
             reporterHandle = nil
         }
+        // Clear logs to free memory
+        logs.removeAll()
+        currentWindow = nil
+        currentMedia = nil
         print("✅ ContentView: Cleanup completed")
     }
     
     private func loadConfig() { if let c = RustBridge.loadConfig() { config = c } }
     private func startLogCleanup() {
-        logCleanupTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-            let date = Date().addingTimeInterval(-300); logs.removeAll { $0.timestamp < date }
+        logCleanupTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in
+            // 更激进的清理：只保留最近 200 条日志（之前是 500 条）
+            let maxLogs = 200
+            if logs.count > maxLogs {
+                logs.removeFirst(logs.count - maxLogs)
+            }
+            // 同时清理超过 2 分钟的日志
+            let date = Date().addingTimeInterval(-120)
+            logs.removeAll { $0.timestamp < date }
         }
     }
     private func checkAccessibilityPermission() { hasAccessibilityPermission = RustBridge.checkAccessibilityPermission() }
@@ -444,8 +460,8 @@ struct ContentView: View {
     private func addLog(_ msg: String, level: LogLevel) {
         let id = UInt64(Date().timeIntervalSince1970 * 1000) + UInt64(logs.count)
         logs.append(LogEntry(id: id, timestamp: Date(), message: msg, level: level))
-        // More aggressive cleanup: keep max 500 entries, remove 200 when threshold reached
-        if logs.count > 500 { logs.removeFirst(200) }
+        // 更激进的清理：超过 200 条时移除前 100 条（频率比原来高，防止日志堆积）
+        if logs.count > 200 { logs.removeFirst(100) }
     }
     
     private var statusIndicatorColor: Color {
