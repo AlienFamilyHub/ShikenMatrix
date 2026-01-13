@@ -1,0 +1,71 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build macOS App
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install Rust nightly (for cbindgen)
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-build"
+          cache-on-failure: true
+
+      - name: Build Rust Library
+        run: |
+          cd macos-ui
+          chmod +x build-rust.sh
+          ./build-rust.sh
+
+      - name: Prepare Rust Lib for Xcode
+        run: |
+          # build-rust.sh already handles everything
+          # Just verify the files exist
+          ls -lh macos-ui/rust-lib/libshikenmatrix.dylib
+          ls -lh macos-ui/rust-lib/shikenmatrix.h || echo "Header not found, will use fallback"
+
+      - name: Build Xcode Project
+        run: |
+          cd macos-ui/ShikenMatrix
+          xcodebuild build \
+            -project ShikenMatrix.xcodeproj \
+            -scheme ShikenMatrix \
+            -configuration Release \
+            -derivedDataPath ../build \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package Application
+        run: |
+          cd macos-ui/build/Build/Products/Release
+          # Create a nice DMG or just zip the .app
+          # Using zip for simplicity
+          zip -r ShikenMatrix.zip ShikenMatrix.app
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: macos-ui/build/Build/Products/Release/ShikenMatrix.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
