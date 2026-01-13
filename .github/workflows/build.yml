@@ -1,0 +1,76 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*" # 当推送的标签匹配 "v*" 时触发工作流
+  workflow_dispatch: # 手动触发工作流
+
+jobs:
+  release:
+    permissions:
+      contents: write # 设置权限为写入内容
+    strategy:
+      fail-fast: false # 如果一个作业失败，不会立即停止所有作业
+      matrix:
+        platform: [windows-latest, macos-latest] # 添加 macOS 平台
+    runs-on: ${{ matrix.platform }} # 在矩阵定义的平台上运行
+
+    steps:
+      - name: Checkout repository # 检出仓库
+        uses: actions/checkout@v4
+
+      - name: Rust setup # 设置 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Node setup # 设置 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm # 设置 pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # version: 0.0.0 # 已有packageManager不选
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - uses: actions/cache@v4
+        name: Setup pnpm cache
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install frontend dependencies # 安装前端依赖
+        run: pnpm install
+
+      - name: Rust cache # Rust 缓存
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Cache Tauri build artifacts # 缓存 Tauri 构建工件
+        uses: actions/cache@v4
+        with:
+          path: |
+            src-tauri/target
+            src-tauri/target/release/bundle
+          key: ${{ runner.os }}-tauri-build-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-tauri-build-
+
+      - name: Build the app # 构建应用
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: __VERSION__
+          releaseBody: "Built by GitHub Action, Kizuna v__VERSION__ based on Tauri"
+          releaseDraft: true
+          prerelease: false
