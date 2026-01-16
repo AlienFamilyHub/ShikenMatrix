@@ -36,7 +36,7 @@ ShikenMatrix 是一个基于 **原生 Rust** 构建的跨平台桌面应用程�
 - **专辑封面展示**：自动获取并显示高质量专辑封面
 - **播放状态同步**：实时同步播放/暂停状态，仅在播放时显示媒体信息
 - **跨应用支持**：支持系统级媒体控制
-  - **macOS**: 使用 MediaRemote 框架（基于 [MediaRemote-rs](https://github.com/TNXG/MediaRemote-rs)）
+    - **macOS**: 使用 MediaRemote 框架（基于 [MediaRemote-rs](https://github.com/TNXG/MediaRemote-rs)）
   - **Windows**: 使用 System Media Transport Controls (SMTC)
 
 ### 🎨 现代化 UI 设计
@@ -57,7 +57,7 @@ ShikenMatrix 是一个基于 **原生 Rust** 构建的跨平台桌面应用程�
 ### 🌐 跨平台支持
 
 - **macOS**：✅ 完整支持（SwiftUI + Metal）
-- **Windows**：🚧 开发中（WinUI 3 + DirectX）
+- **Windows**：✅ 完整支持（WinUI 3 + DirectX）
 - **架构设计**：采用平台抽象层（`platform` 模块），便于扩展到其他操作系统
 
 ---
@@ -116,7 +116,7 @@ ShikenMatrix 是一个基于 **原生 Rust** 构建的跨平台桌面应用程�
 
 ```bash
 # 克隆项目
-git clone https://github.com/TNXG/ShikenMatrix.git
+git clone https://github.com/AlienFamilyHub/ShikenMatrix.git
 cd ShikenMatrix
 
 # 1. 构建 Rust 库
@@ -129,10 +129,21 @@ open ShikenMatrix/ShikenMatrix.xcodeproj
 # 3. 在 Xcode 中运行 (Cmd+R)
 ```
 
-#### Windows（开发中）
+#### Windows
 
 ```bash
-# 待 Windows 版本开发完成
+# 克隆项目
+git clone https://github.com/AlienFamilyHub/ShikenMatrix.git
+cd ShikenMatrix/win-ui
+
+# 1. 使用 Visual Studio 打开解决方案
+# 双击 ShikenMatrix.slnx 或 ShikenMatrix.csproj
+
+# 2. 在 Visual Studio 中还原 NuGet 包
+# Visual Studio 会自动提示还原包
+
+# 3. 构建并运行 (F5)
+# 首次构建时会自动执行 pre-build.ps1 编译 Rust 库
 ```
 
 ### 权限配置
@@ -163,17 +174,21 @@ Windows 系统对窗口信息访问的权限管理相对宽松，通常无需额
 ShikenMatrix/
 ├── src/                          # Rust 后端代码
 │   ├── ffi/                      # FFI 接口（C ABI）
-│   │   └── reporter.rs           # 上报服务 FFI
+│   │   ├── mod.rs                # FFI 模块
+│   │   ├── reporter.rs           # 上报服务 FFI
+│   │   └── types.rs              # FFI 类型定义
 │   ├── platform/                 # 平台抽象层
 │   │   ├── mod.rs                # 平台接口定义
 │   │   ├── macos/                # macOS 平台实现
 │   │   │   ├── window.rs         # 窗口监控 (Accessibility API)
 │   │   │   └── media.rs          # 媒体监控 (MediaRemote)
-│   │   └── windows/              # Windows 平台实现（开发中）
-│   │       ├── window.rs         # 窗口监控 (WinAPI)
+│   │   └── windows/              # Windows 平台实现
+│   │       ├── window.rs         # 窗口监控 (Win32 API)
 │   │       └── media.rs          # 媒体监控 (SMTC)
 │   ├── services/                 # 核心服务
-│   │   └── reporter.rs           # 上报服务（WebSocket）
+│   │   ├── mod.rs                # 服务模块
+│   │   ├── reporter.rs           # 上报服务（WebSocket）
+│   │   └── config.rs             # 配置管理
 │   ├── lib.rs                    # 库入口
 │   └── main.rs                   # 可执行文件入口
 │
@@ -182,14 +197,38 @@ ShikenMatrix/
 │   │   ├── ShikenMatrix/         # SwiftUI 源码
 │   │   │   ├── ShikenMatrixApp.swift    # 应用入口
 │   │   │   ├── ContentView.swift        # 主窗口
-│   │   │   ├── RustBridge.swift         # FFI 桥接
+│   │   │   ├── StatusBarManager.swift  # 状态栏管理
 │   │   │   └── Assets.xcassets/         # 资源文件
 │   │   └── ShikenMatrix.xcodeproj       # Xcode 项目文件
 │   ├── build-rust.sh             # Rust 构建脚本
 │   └── rust-lib/                 # 编译后的 Rust 库
 │
+├── win-ui/                       # Windows UI 项目
+│   └── ShikenMatrix/             # WinUI 3 项目
+│       ├── App.xaml.cs           # 应用入口
+│       ├── MainWindow.xaml       # 主窗口 XAML
+│       ├── MainWindow.xaml.cs    # 主窗口逻辑
+│       ├── ViewModels/           # MVVM 视图模型
+│       │   └── MainViewModel.cs  # 主视图模型
+│       ├── Models/               # 数据模型
+│       │   ├── LogEntry.cs       # 日志条目
+│       │   ├── MediaData.cs      # 媒体数据
+│       │   ├── WindowData.cs     # 窗口数据
+│       │   └── ...
+│       ├── Services/             # 服务层
+│       │   ├── RustBridge.cs     # Rust FFI 调用
+│       │   └── TrayIconManager.cs # 系统托盘
+│       ├── Native/               # 原生方法声明
+│       │   └── NativeMethods.cs  # P/Invoke 声明
+│       ├── Converters/           # 值转换器
+│       ├── Assets/               # 应用资源
+│       ├── pre-build.ps1         # Rust 预构建脚本
+│       └── ShikenMatrix.csproj   # 项目文件
+│
 ├── Cargo.toml                    # Rust 依赖配置
 ├── cbindgen.toml                 # cbindgen 配置
+├── build.rs                      # Rust 构建脚本
+├── .gitattributes                # Git 属性配置（换行符）
 └── README.md                     # 项目说明文档
 ```
 
@@ -206,17 +245,17 @@ ShikenMatrix/
 - 异步任务处理（基于 tokio）
 - 平台特定实现：
   - **macOS**: 使用 objc2 绑定调用 Core Foundation / AppKit / MediaRemote
-  - **Windows**: 使用 winapi 调用 WinAPI / Windows Media Control
+  - **Windows**: 使用 windows-rs 调用 Win32 API / Windows Media Control
 
 **前端**
 
 - **macOS**: SwiftUI + AppKit
   - 使用 `@main` 和 `App` 协议
   - 原生窗口控制和系统集成
-  - Metal 加速的图形渲染
-- **Windows**: WinUI 3 + Windows App SDK
+- **Windows**: WinUI 3 + Windows App SDK (.NET 8.0)
   - 使用 WinUI 3 的现代控件
   - Fluent Design 设计语言
+  - 系统托盘集成
 
 ### 添加新功能
 
@@ -242,13 +281,17 @@ ShikenMatrix/
   - core-foundation - Core Foundation 框架绑定
   - [MediaRemote-rs](https://github.com/TNXG/MediaRemote-rs) - MediaRemote 框架绑定（自有库）
 - **Windows**:
-  - winapi - Windows API 绑定
-  - windows-rs - 现代 Windows API 绑定
+  - windows-rs (0.62) - 现代 Windows API 绑定
+    - Win32_Foundation
+    - Win32_UI_WindowsAndMessaging
+    - Win32_System_Threading
+    - Media_Control
+    - Storage_Streams
 
 **前端技术**
 
-- **macOS**: SwiftUI, AppKit, Metal
-- **Windows**: WinUI 3, Windows App SDK, DirectX
+- **macOS**: SwiftUI, AppKit
+- **Windows**: WinUI 3, Windows App SDK, .NET 8.0
 
 ---
 
