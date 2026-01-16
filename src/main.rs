@@ -4,7 +4,6 @@ mod platform;
 use services::{Reporter, load_config};
 use std::sync::Arc;
 use tokio::signal;
-use base64::{Engine as _, engine::general_purpose};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

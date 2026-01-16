@@ -9,6 +9,10 @@ use futures_util::{SinkExt, StreamExt};
 use url::Url;
 use tracing::{info, error, warn};
 
+#[cfg(target_os = "windows")]
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+
 use crate::platform::{WindowInfo, MediaMetadata, PlaybackState};
 
 /// Callback types for pushing data to frontend (using usize for thread-safe pointer storage)
@@ -312,6 +316,9 @@ impl Reporter {
         let reporter_clone = self.clone();
         
         std::thread::spawn(move || {
+            // Wait a bit for callbacks to be registered from frontend
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            
             reporter_clone.push_log(0, "窗口监控已启动");
             let mut permission_warned = false;
             let mut check_count = 0;
@@ -431,16 +438,72 @@ impl Reporter {
                 
                 #[cfg(target_os = "windows")]
                 {
+                    // Monitor window info
                     match crate::platform::windows::get_frontmost_window() {
                         Ok(window_info) => {
-                            reporter_clone.push_window_data(&window_info.title, &window_info.process_name, window_info.pid as u32);
-                            reporter_clone.send_window_info(&window_info);
+                            if last_window_info.as_ref() != Some(&window_info) {
+                                let log_msg = format!("获取到窗口信息: {} ({})", window_info.title, window_info.process_name);
+                                reporter_clone.push_log(0, &log_msg);
+                                
+                                // Push window data to frontend (with icon if available)
+                                reporter_clone.push_window_data(
+                                    &window_info.title, 
+                                    &window_info.process_name, 
+                                    window_info.pid as u32, 
+                                    window_info.icon_data.as_ref().map(|v| v.as_slice())
+                                );
+                                
+                                reporter_clone.send_window_info(&window_info);
+                                permission_warned = false; // Reset warning flag on success
+                                
+                                last_window_info = Some(window_info);
+                            }
                         }
                         Err(e) => {
                             if !permission_warned {
                                 let err_msg = format!("获取窗口信息失败: {}", e);
                                 reporter_clone.push_log(1, &err_msg);
                                 permission_warned = true;
+                            }
+                        }
+                    }
+
+                    // Monitor media playback (every second)
+                    // DISABLED by default - set ENABLE_MEDIA_REPORTING=1 to enable
+                    if std::env::var("ENABLE_MEDIA_REPORTING").unwrap_or_default() == "1" {
+                        if let Ok(Some(metadata)) = crate::platform::windows::get_media_metadata() {
+                            if let Ok(Some(state)) = crate::platform::windows::get_playback_state() {
+
+                                let metadata_changed = last_media_metadata.as_ref() != Some(&metadata);
+                                let state_changed = last_playback_state.as_ref() != Some(&state);
+
+                                if metadata_changed || state_changed {
+                                    // Decode Base64 artwork if available
+                                    let artwork_vec = metadata.artwork_data.as_ref().and_then(|b64| {
+                                        BASE64.decode(b64).ok()
+                                    });
+                                    let artwork_slice = artwork_vec.as_ref().map(|v: &Vec<u8>| v.as_slice());
+
+                                    // Push media data to frontend
+                                    let title = metadata.title.as_deref().unwrap_or("未知");
+                                    let artist = metadata.artist.as_deref().unwrap_or("未知");
+                                    let album = metadata.album.as_deref().unwrap_or("未知");
+                                    reporter_clone.push_media_data(
+                                        title,
+                                        artist,
+                                        album,
+                                        metadata.duration,
+                                        state.elapsed_time,
+                                        state.playing,
+                                        artwork_slice.as_deref()
+                                    );
+
+                                    // Note: Windows doesn't send_media_playback or upload_artwork
+                                    // due to platform differences in media API structure
+
+                                    last_media_metadata = Some(metadata);
+                                    last_playback_state = Some(state);
+                                }
                             }
                         }
                     }

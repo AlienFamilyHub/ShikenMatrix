@@ -17,6 +17,6 @@ fn main() {
 
     #[cfg(target_os = "windows")]
     if std::env::var("CARGO_CFG_TARGET_OS").ok().as_deref() == Some("windows") {
-        embed_resource::compile("app-icon.rc", embed_resource::NONE);
+        let _ = embed_resource::compile("app-icon.rc", embed_resource::NONE);
     }
 }

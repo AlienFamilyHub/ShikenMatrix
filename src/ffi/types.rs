@@ -53,7 +53,7 @@ pub struct SmReporter;
 // It's never directly constructed or deconstructed by foreign code
 
 /// Log level for callback
-#[repr(C)]
+#[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum SmLogLevel {
     Info = 0,

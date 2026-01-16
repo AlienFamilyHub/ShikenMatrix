@@ -15,7 +15,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 
 /// 播放状态信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlaybackState {
     /// 是否正在播放
     pub playing: bool,
@@ -26,7 +26,7 @@ pub struct PlaybackState {
 }
 
 /// 媒体元数据
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MediaMetadata {
     /// 应用 Bundle ID (Windows 上为 AUMID)
     pub bundle_identifier: Option<String>,
@@ -78,7 +78,8 @@ pub fn get_media_metadata() -> std::result::Result<Option<MediaMetadata>, String
 }
 
 async fn get_smtc_info() -> Result<Option<(MediaMetadata, PlaybackState)>> {
-    let session_manager = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?.get()?;
+    let session_manager_async = GlobalSystemMediaTransportControlsSessionManager::RequestAsync()?;
+    let session_manager = session_manager_async.await?;
     let current_session = session_manager.GetCurrentSession()?;
 
     // 获取播放信息
@@ -108,7 +109,7 @@ async fn get_smtc_info() -> Result<Option<(MediaMetadata, PlaybackState)>> {
 
     // 获取媒体属性
     let media_properties_operation = current_session.TryGetMediaPropertiesAsync()?;
-    let media_properties = media_properties_operation.get()?;
+    let media_properties = media_properties_operation.await?;
 
     let source_app_name_hstring: HSTRING = current_session.SourceAppUserModelId()?.into();
     let title_hstring: HSTRING = media_properties.Title()?.into();
@@ -120,24 +121,26 @@ async fn get_smtc_info() -> Result<Option<(MediaMetadata, PlaybackState)>> {
     let mut artwork_mime_type = None;
 
     if let Ok(thumbnail_ref) = media_properties.Thumbnail() {
-        if let Ok(thumbnail_stream) = thumbnail_ref.OpenReadAsync()?.get() {
-             if let Ok(data_reader) = DataReader::CreateDataReader(&thumbnail_stream) {
-                let stream_size = thumbnail_stream.Size()?;
-                let stream_size_u32: u32 = stream_size.try_into().unwrap_or(0);
-                
-                if stream_size_u32 > 0 {
-                    if let Ok(_) = data_reader.LoadAsync(stream_size_u32)?.get() {
-                        let mut buffer = vec![0u8; stream_size_u32 as usize];
-                        if let Ok(_) = data_reader.ReadBytes(&mut buffer) {
-                             // 转换为 Base64
-                             artwork_data = Some(BASE64.encode(&buffer));
-                             // 简单猜测 MIME，通常是 PNG 或 JPEG，这里假设是 PNG 因为参考代码保存为 .png
-                             // 但实际上可能是 jpg。Windows Thumbnail 流通常有 ContentType 属性，但这里简化处理
-                             artwork_mime_type = Some("image/png".to_string());
+        if let Ok(thumbnail_stream_async) = thumbnail_ref.OpenReadAsync() {
+            if let Ok(thumbnail_stream) = thumbnail_stream_async.await {
+                if let Ok(data_reader) = DataReader::CreateDataReader(&thumbnail_stream) {
+                    let stream_size = thumbnail_stream.Size()?;
+                    let stream_size_u32: u32 = stream_size.try_into().unwrap_or(0);
+                    
+                    if stream_size_u32 > 0 {
+                        if let Ok(_) = data_reader.LoadAsync(stream_size_u32)?.await {
+                            let mut buffer = vec![0u8; stream_size_u32 as usize];
+                            if let Ok(_) = data_reader.ReadBytes(&mut buffer) {
+                                // 转换为 Base64
+                                artwork_data = Some(BASE64.encode(&buffer));
+                                // 简单猜测 MIME，通常是 PNG 或 JPEG，这里假设是 PNG 因为参考代码保存为 .png
+                                // 但实际上可能是 jpg。Windows Thumbnail 流通常有 ContentType 属性，但这里简化处理
+                                artwork_mime_type = Some("image/png".to_string());
+                            }
                         }
                     }
                 }
-             }
+            }
         }
     }
 

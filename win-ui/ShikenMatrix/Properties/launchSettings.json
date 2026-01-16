@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ShikenMatrix (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "ShikenMatrix (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

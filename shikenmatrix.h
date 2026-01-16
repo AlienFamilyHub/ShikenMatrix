@@ -11,11 +11,12 @@
 /**
  * Log level for callback
  */
-typedef enum SmLogLevel {
+enum SmLogLevel {
   Info = 0,
   Warning = 1,
   Error = 2,
-} SmLogLevel;
+};
+typedef uint8_t SmLogLevel;
 
 /**
  * Configuration for the reporter
@@ -67,7 +68,7 @@ typedef struct SmStatus {
 /**
  * Callback function type for logs
  */
-typedef void (*SmLogCallback)(enum SmLogLevel level, const char *message, uintptr_t user_data);
+typedef void (*SmLogCallback)(SmLogLevel level, const char *message, uintptr_t user_data);
 
 /**
  * Callback function type for window data (with icon)
