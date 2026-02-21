@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="ShikenMatrix.Controls.MonitorCard"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:ShikenMatrix.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <converters:NullToVisibilityConverter x:Key="NullToVisibilityConverter"/>
+
+        <Style x:Key="SidebarCardStyle" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}"/>
+            <Setter Property="BorderBrush" Value="{ThemeResource SurfaceStrokeColorDefaultBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="12"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="Shadow">
+                <Setter.Value>
+                    <ThemeShadow/>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel Spacing="6">
+        <!-- 监控卡片标题 -->
+        <StackPanel Orientation="Horizontal"
+                    Spacing="6"
+                    Margin="0,4,0,8">
+            <FontIcon Glyph="&#xE9D9;"
+                      FontSize="12"
+                      Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+            <TextBlock Text="LIVE MONITOR"
+                       Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                       FontWeight="Bold"
+                       Opacity="0.8"/>
+        </StackPanel>
+
+        <!-- 等待状态 -->
+        <Border Style="{StaticResource SidebarCardStyle}"
+                Visibility="{Binding CurrentWindow, Converter={StaticResource NullToVisibilityConverter}, ConverterParameter=Inverse}">
+            <StackPanel Spacing="12"
+                        HorizontalAlignment="Center"
+                        Padding="24">
+                <ProgressRing IsActive="{Binding IsRunning}"
+                              Width="24"
+                              Height="24"
+                              Foreground="{ThemeResource AccentFillColorDefaultBrush}"/>
+                <TextBlock Text="等待信号接入..."
+                           FontSize="12"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+            </StackPanel>
+        </Border>
+
+        <!-- 活跃窗口卡片 -->
+        <Border Style="{StaticResource SidebarCardStyle}"
+                Visibility="{Binding CurrentWindow, Converter={StaticResource NullToVisibilityConverter}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 窗口图标 -->
+                <Border Grid.Column="0"
+                        Width="40"
+                        Height="40"
+                        Margin="0,0,12,0"
+                        CornerRadius="20"
+                        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                        BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                        BorderThickness="1">
+                    <Grid>
+                        <Image Source="{Binding CurrentWindow.Icon}"
+                               Visibility="{Binding CurrentWindow.Icon, Converter={StaticResource NullToVisibilityConverter}}"
+                               Stretch="UniformToFill"/>
+                        <FontIcon Glyph="&#xE792;"
+                                  FontSize="18"
+                                  Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                                  Visibility="{Binding CurrentWindow.Icon, Converter={StaticResource NullToVisibilityConverter}, ConverterParameter=Inverse}"/>
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Column="1"
+                            Spacing="2"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="当前活动窗口"
+                               FontSize="10"
+                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                    <TextBlock Text="{Binding CurrentWindow.Title}"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis"
+                               MaxLines="1"/>
+                    <TextBlock Text="{Binding CurrentWindow.ProcessName}"
+                               FontSize="11"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 媒体卡片 -->
+        <Border Style="{StaticResource SidebarCardStyle}"
+                Visibility="{Binding CurrentMedia, Converter={StaticResource NullToVisibilityConverter}}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 封面占位 -->
+                <Border Grid.Column="0"
+                        Width="40"
+                        Height="40"
+                        CornerRadius="6"
+                        Background="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                        Margin="0,0,12,0">
+                    <Grid>
+                        <Image Source="{Binding CurrentMedia.Artwork}"
+                               Visibility="{Binding CurrentMedia.Artwork, Converter={StaticResource NullToVisibilityConverter}}"
+                               Stretch="UniformToFill"/>
+                        <FontIcon Glyph="&#xE8D6;"
+                                  FontSize="16"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"
+                                  Visibility="{Binding CurrentMedia.Artwork, Converter={StaticResource NullToVisibilityConverter}, ConverterParameter=Inverse}"/>
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Column="1"
+                            Spacing="0"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="正在播放"
+                               FontSize="10"
+                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                    <TextBlock Text="{Binding CurrentMedia.Title}"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding CurrentMedia.Artist}"
+                               FontSize="11"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 错误提示 -->
+        <InfoBar IsOpen="{Binding HasError}"
+                 Severity="Error"
+                 Title="错误"
+                 Message="{Binding LastError}"
+                 IsClosable="False"
+                 Margin="0,0,0,12"/>
+    </StackPanel>
+</UserControl>

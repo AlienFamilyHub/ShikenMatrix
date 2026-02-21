@@ -16,6 +16,7 @@ namespace ShikenMatrix.Services
         private NotifyIcon? _notifyIcon;
         private Window? _mainWindow;
         private bool _isDisposed;
+        private Icon? _currentIcon;
 
         public TrayIconManager()
         {
@@ -27,7 +28,8 @@ namespace ShikenMatrix.Services
             };
 
             // Set icon (using a simple icon for now)
-            _notifyIcon.Icon = CreateIcon();
+            _currentIcon = CreateIcon();
+            _notifyIcon.Icon = _currentIcon;
 
             // Build context menu
             BuildContextMenu();
@@ -194,8 +196,24 @@ namespace ShikenMatrix.Services
             if (_notifyIcon != null)
             {
                 _notifyIcon.Visible = false;
+                _notifyIcon.DoubleClick -= OnDoubleClick;
+                
+                // Dispose context menu
+                if (_notifyIcon.ContextMenuStrip != null)
+                {
+                    _notifyIcon.ContextMenuStrip.Dispose();
+                    _notifyIcon.ContextMenuStrip = null;
+                }
+                
                 _notifyIcon.Dispose();
                 _notifyIcon = null;
+            }
+            
+            // Dispose icon to free GDI resources
+            if (_currentIcon != null)
+            {
+                _currentIcon.Dispose();
+                _currentIcon = null;
             }
         }
     }

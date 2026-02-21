@@ -26,6 +26,45 @@ namespace ShikenMatrix.Services
 
         private IntPtr _reporterHandle = IntPtr.Zero;
         private bool _updatesEnabled = true;
+        private Microsoft.UI.Dispatching.DispatcherQueue? _dispatcher;
+
+        public RustBridge()
+        {
+            // Capture the UI thread dispatcher
+            _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+            if (_dispatcher == null)
+            {
+                System.Diagnostics.Debug.WriteLine("[RustBridge] WARNING: No dispatcher available in constructor");
+            }
+        }
+
+        #region Version Methods
+
+        /// <summary>
+        /// Get the native library version
+        /// </summary>
+        public string GetVersion()
+        {
+            IntPtr versionPtr = NativeMethods.SmGetVersion();
+            if (versionPtr == IntPtr.Zero)
+                return "Unknown";
+
+            try
+            {
+                string version = MarshalHelper.PtrToStringUTF8(versionPtr) ?? "Unknown";
+                NativeMethods.SmStringFree(versionPtr);
+                return version;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Error getting version: {ex.Message}");
+                if (versionPtr != IntPtr.Zero)
+                    NativeMethods.SmStringFree(versionPtr);
+                return "Unknown";
+            }
+        }
+
+        #endregion
 
         #region Configuration Methods
 
@@ -65,8 +104,8 @@ namespace ShikenMatrix.Services
         /// </summary>
         public bool SaveConfig(ReporterConfig config)
         {
-            IntPtr wsUrlPtr = MarshalHelper.StringToPtrUTF8(config.WsUrl);
-            IntPtr tokenPtr = MarshalHelper.StringToPtrUTF8(config.Token);
+            IntPtr wsUrlPtr = MarshalHelper.StringToPtrUTF8(config.WsUrl ?? string.Empty);
+            IntPtr tokenPtr = MarshalHelper.StringToPtrUTF8(config.Token ?? string.Empty);
 
             try
             {
@@ -116,8 +155,8 @@ namespace ShikenMatrix.Services
                 return false;
             }
 
-            IntPtr wsUrlPtr = MarshalHelper.StringToPtrUTF8(config.WsUrl);
-            IntPtr tokenPtr = MarshalHelper.StringToPtrUTF8(config.Token);
+            IntPtr wsUrlPtr = MarshalHelper.StringToPtrUTF8(config.WsUrl ?? string.Empty);
+            IntPtr tokenPtr = MarshalHelper.StringToPtrUTF8(config.Token ?? string.Empty);
 
             try
             {
@@ -320,24 +359,79 @@ namespace ShikenMatrix.Services
 
         private void WindowCallbackWrapper(IntPtr title, IntPtr processName, uint pid, IntPtr iconData, UIntPtr iconSize, UIntPtr userData)
         {
-            System.Diagnostics.Debug.WriteLine($"[RustBridge] WindowCallback called: pid={pid}, updatesEnabled={_updatesEnabled}");
-            
             if (!_updatesEnabled)
                 return;
 
             string? titleStr = MarshalHelper.PtrToStringUTF8(title);
             string? processNameStr = MarshalHelper.PtrToStringUTF8(processName);
-            System.Diagnostics.Debug.WriteLine($"[RustBridge] Window: {titleStr} ({processNameStr})");
 
             var windowData = new WindowData
             {
                 Title = titleStr ?? "Unknown",
                 ProcessName = processNameStr ?? "Unknown",
                 Pid = pid,
-                Icon = GetWindowIcon(pid) // Fetch icon natively
+                Icon = null // Will be loaded asynchronously
             };
 
             OnWindowData?.Invoke(windowData);
+            
+            // Load icon asynchronously on UI thread
+            _ = LoadIconAsync(windowData, pid);
+        }
+
+        private async System.Threading.Tasks.Task LoadIconAsync(WindowData windowData, uint pid)
+        {
+            try
+            {
+                var process = System.Diagnostics.Process.GetProcessById((int)pid);
+                string? exePath = process?.MainModule?.FileName;
+                
+                if (string.IsNullOrEmpty(exePath))
+                    return;
+
+                var icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+                if (icon == null)
+                    return;
+
+                byte[] iconBytes;
+                using (var bitmap = icon.ToBitmap())
+                using (var memory = new System.IO.MemoryStream())
+                {
+                    bitmap.Save(memory, System.Drawing.Imaging.ImageFormat.Png);
+                    iconBytes = memory.ToArray();
+                }
+
+                // Dispose icon to free GDI resources
+                icon.Dispose();
+
+                // Switch to UI thread to create BitmapImage
+                if (_dispatcher == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RustBridge] No dispatcher available for icon");
+                    return;
+                }
+
+                _dispatcher.TryEnqueue(() =>
+                {
+                    try
+                    {
+                        var bitmapImage = CreateBitmapImageFromBytes(iconBytes, 40, 40);
+                        if (bitmapImage != null)
+                        {
+                            windowData.Icon = bitmapImage;
+                            System.Diagnostics.Debug.WriteLine($"[RustBridge] Icon loaded for PID {pid}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[RustBridge] Failed to create icon on UI thread: {ex.Message}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] LoadIconAsync failed for PID {pid}: {ex.Message}");
+            }
         }
 
         private void MediaCallbackWrapper(IntPtr title, IntPtr artist, IntPtr album, double duration, double elapsedTime, bool playing, IntPtr artworkData, UIntPtr artworkSize, UIntPtr userData)
@@ -357,10 +451,58 @@ namespace ShikenMatrix.Services
                 Duration = duration,
                 ElapsedTime = elapsedTime,
                 Playing = playing,
-                Artwork = GetArtworkImage(artworkData, artworkSize)
+                Artwork = null // Will be loaded asynchronously
             };
 
             OnMediaData?.Invoke(mediaData);
+            
+            // Load artwork asynchronously on UI thread
+            if (artworkData != IntPtr.Zero && artworkSize != UIntPtr.Zero)
+            {
+                byte[]? artworkBytes = MarshalHelper.PtrToByteArray(artworkData, artworkSize);
+                if (artworkBytes != null)
+                {
+                    _ = LoadArtworkAsync(mediaData, artworkBytes);
+                }
+            }
+        }
+
+        private async System.Threading.Tasks.Task LoadArtworkAsync(MediaData mediaData, byte[] artworkBytes)
+        {
+            try
+            {
+                // Switch to UI thread to create BitmapImage
+                if (_dispatcher == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RustBridge] No dispatcher available for artwork");
+                    return;
+                }
+
+                _dispatcher.TryEnqueue(() =>
+                {
+                    try
+                    {
+                        var bitmapImage = CreateBitmapImageFromBytes(artworkBytes, 200, 200);
+                        if (bitmapImage != null)
+                        {
+                            mediaData.Artwork = bitmapImage;
+                            System.Diagnostics.Debug.WriteLine($"[RustBridge] Artwork loaded successfully");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[RustBridge] CreateBitmapImageFromBytes returned null");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[RustBridge] Failed to create artwork on UI thread: {ex.Message}");
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] LoadArtworkAsync failed: {ex.Message}");
+            }
         }
 
         // Dummy callbacks to prevent crashes
@@ -373,19 +515,158 @@ namespace ShikenMatrix.Services
         #region Image Helpers
 
         /// <summary>
-        /// Get window icon from system (native Windows API)
+        /// Get application icon from process ID using Windows Shell API
+        /// Must be called from UI thread or use Dispatcher
         /// </summary>
-        private BitmapImage? GetWindowIcon(uint pid)
+        private BitmapImage? GetIconFromProcess(uint pid)
         {
             try
             {
-                // Use Windows API to get application icon
-                // This is a placeholder - actual implementation would use Windows APIs
-                // For now, return null which will use a default icon in the UI
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Attempting to get icon for PID {pid}");
+                
+                var process = System.Diagnostics.Process.GetProcessById((int)pid);
+                if (process == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RustBridge] Process {pid} not found");
+                    return null;
+                }
+
+                string? exePath = null;
+                try
+                {
+                    exePath = process.MainModule?.FileName;
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RustBridge] Cannot access MainModule for PID {pid}: {ex.Message}");
+                    return null;
+                }
+
+                if (string.IsNullOrEmpty(exePath))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RustBridge] No executable path for PID {pid}");
+                    return null;
+                }
+
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Extracting icon from: {exePath}");
+                
+                // Extract icon from executable
+                var icon = System.Drawing.Icon.ExtractAssociatedIcon(exePath);
+                if (icon == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RustBridge] No icon found for {exePath}");
+                    return null;
+                }
+
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Icon extracted, converting to BitmapImage");
+
+                // Convert Icon to byte array
+                byte[] iconBytes;
+                using (var bitmap = icon.ToBitmap())
+                using (var memory = new System.IO.MemoryStream())
+                {
+                    bitmap.Save(memory, System.Drawing.Imaging.ImageFormat.Png);
+                    iconBytes = memory.ToArray();
+                }
+
+                // Create BitmapImage on UI thread
+                BitmapImage? result = null;
+                var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+                if (dispatcher != null)
+                {
+                    // Already on UI thread
+                    result = CreateBitmapImageFromBytes(iconBytes, 40, 40);
+                }
+                else
+                {
+                    // Need to invoke on UI thread - but we can't wait here
+                    // Return null and let UI show placeholder
+                    System.Diagnostics.Debug.WriteLine($"[RustBridge] Not on UI thread, cannot create BitmapImage");
+                    return null;
+                }
+                
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Icon converted successfully for PID {pid}");
+                return result;
+            }
+            catch (System.ComponentModel.Win32Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Access denied for PID {pid}: {ex.Message}");
                 return null;
             }
-            catch
+            catch (ArgumentException ex)
             {
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Process {pid} has exited: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Failed to get icon for PID {pid}: {ex.GetType().Name} - {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Create BitmapImage from byte array (must be called on UI thread)
+        /// </summary>
+        private BitmapImage? CreateBitmapImageFromBytes(byte[] bytes, int width, int height)
+        {
+            Windows.Storage.Streams.InMemoryRandomAccessStream? raStream = null;
+            try
+            {
+                var bitmapImage = new BitmapImage();
+                bitmapImage.DecodePixelWidth = width;
+                bitmapImage.DecodePixelHeight = height;
+                
+                raStream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                var writeTask = raStream.WriteAsync(bytes.AsBuffer()).AsTask();
+                writeTask.Wait();
+                raStream.Seek(0);
+                bitmapImage.SetSource(raStream);
+                
+                return bitmapImage;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Failed to create BitmapImage: {ex.Message}");
+                return null;
+            }
+            finally
+            {
+                // Dispose stream to free memory
+                raStream?.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Convert icon data from callback to BitmapImage
+        /// </summary>
+        private BitmapImage? GetWindowIconFromData(IntPtr data, UIntPtr size)
+        {
+            if (data == IntPtr.Zero || size == UIntPtr.Zero)
+                return null;
+
+            try
+            {
+                byte[]? buffer = MarshalHelper.PtrToByteArray(data, size);
+                if (buffer == null)
+                    return null;
+
+                var image = new BitmapImage();
+                // Set decode pixel size for icons
+                image.DecodePixelWidth = 40;
+                image.DecodePixelHeight = 40;
+                
+                using (var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream())
+                {
+                    stream.WriteAsync(buffer.AsBuffer()).AsTask().Wait();
+                    stream.Seek(0);
+                    image.SetSource(stream);
+                }
+                return image;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Failed to load icon: {ex.Message}");
                 return null;
             }
         }
@@ -400,25 +681,16 @@ namespace ShikenMatrix.Services
 
             try
             {
-                // Limit size to 2MB to prevent memory issues
-                if (size.ToUInt64() > 2_000_000)
-                    return null;
-
                 byte[]? buffer = MarshalHelper.PtrToByteArray(data, size);
                 if (buffer == null)
                     return null;
 
-                var image = new BitmapImage();
-                using (var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream())
-                {
-                    stream.WriteAsync(buffer.AsBuffer()).AsTask().Wait();
-                    stream.Seek(0);
-                    image.SetSource(stream);
-                }
-                return image;
+                // Create BitmapImage - must be on UI thread
+                return CreateBitmapImageFromBytes(buffer, 200, 200);
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"[RustBridge] Failed to load artwork: {ex.Message}");
                 return null;
             }
         }

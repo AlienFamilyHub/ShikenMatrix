@@ -188,6 +188,17 @@ namespace ShikenMatrix.Native
 
         #endregion
 
+        #region Version Methods
+
+        /// <summary>
+        /// Get the library version string
+        /// Returns a pointer to a null-terminated UTF-8 string that must be freed with sm_string_free
+        /// </summary>
+        [DllImport(DllName, EntryPoint = "sm_get_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern IntPtr SmGetVersion();
+
+        #endregion
+
         #region Callback Methods
 
         /// <summary>

@@ -243,6 +243,13 @@ void sm_reporter_set_window_callback(SmWindowDataCallback callback, uintptr_t us
  */
 void sm_reporter_set_media_callback(SmMediaDataCallback callback, uintptr_t user_data);
 
+/**
+ * Get the library version string
+ * Returns a pointer to a null-terminated UTF-8 string
+ * The caller must free the returned string using sm_string_free
+ */
+char *sm_get_version(void);
+
 extern bool AXIsProcessTrusted(void);
 
 extern bool AXIsProcessTrustedWithOptions(const __CFDictionary *options);

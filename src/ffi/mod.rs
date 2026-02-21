@@ -10,6 +10,7 @@ pub mod accessibility;
 pub mod config;
 pub mod reporter;
 pub mod types;
+pub mod version;
 
 // Re-export the main FFI API
 pub use types::{SmConfig, SmStatus, SmWindowInfo, SmReporter};

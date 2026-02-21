@@ -7,7 +7,7 @@ using ShikenMatrix.Native;
 namespace ShikenMatrix.Converters
 {
     /// <summary>
-    /// Convert log level to color
+    /// Convert log level to color brush
     /// </summary>
     public class LogLevelColorConverter : IValueConverter
     {
@@ -15,15 +15,16 @@ namespace ShikenMatrix.Converters
         {
             if (value is SmLogLevel level)
             {
-                return level switch
+                var color = level switch
                 {
                     SmLogLevel.Info => Microsoft.UI.ColorHelper.FromArgb(255, 0, 120, 215),   // Blue
                     SmLogLevel.Warning => Microsoft.UI.ColorHelper.FromArgb(255, 255, 140, 0),  // Orange
                     SmLogLevel.Error => Microsoft.UI.ColorHelper.FromArgb(255, 232, 17, 35),    // Red
                     _ => Microsoft.UI.Colors.Gray
                 };
+                return new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
             }
-            return Microsoft.UI.Colors.Gray;
+            return new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Gray);
         }
 
         public object ConvertBack(object value, Type targetType, object parameter, string language)

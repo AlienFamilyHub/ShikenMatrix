@@ -17,7 +17,20 @@ namespace ShikenMatrix.ViewModels
         private readonly RustBridge _bridge;
         private readonly DispatcherQueue _dispatcher;
         private readonly DispatcherQueueTimer _statusTimer;
-        private readonly DispatcherQueueTimer _logCleanupTimer;
+
+        // String constants to avoid allocations
+        private const string UnknownString = "Unknown";
+        
+        // Monitor status
+        private const string MonitorReadyStatus = "就绪";
+        private const string MonitorRunningStatus = "监控中";
+        private const string MonitorStoppedStatus = "已停止";
+        
+        // API status
+        private const string ApiConnectingStatus = "连接中...";
+        private const string ApiConnectedStatus = "已连接";
+        private const string ApiDisconnectedStatus = "未连接";
+        private const string ApiErrorStatus = "连接失败";
 
         // Configuration
         private ReporterConfig _config = new ReporterConfig();
@@ -26,8 +39,11 @@ namespace ShikenMatrix.ViewModels
         // Status
         private bool _isRunning;
         private bool _isConnected;
-        private string _statusMessage = "就绪";
         private string? _lastError;
+        
+        // Separate status indicators
+        private string _monitorStatus = MonitorReadyStatus;
+        private string _apiStatus = ApiDisconnectedStatus;
 
         // Permissions
         private bool _hasAccessibilityPermission = true; // Windows doesn't require explicit permission
@@ -36,6 +52,9 @@ namespace ShikenMatrix.ViewModels
         // Data
         private WindowData? _currentWindow;
         private MediaData? _currentMedia;
+        
+        // Version
+        private string _version = "Unknown";
 
         // UI Logic
         private string _searchText = string.Empty;
@@ -54,12 +73,11 @@ namespace ShikenMatrix.ViewModels
             _statusTimer.Interval = TimeSpan.FromSeconds(1);
             _statusTimer.Tick += OnStatusTimerTick;
 
-            _logCleanupTimer = _dispatcher.CreateTimer();
-            _logCleanupTimer.Interval = TimeSpan.FromSeconds(15);
-            _logCleanupTimer.Tick += OnLogCleanupTimerTick;
-
             // Load initial config
             LoadConfig();
+            
+            // Get version from native library
+            Version = _bridge.GetVersion();
         }
 
         #region Properties
@@ -101,7 +119,6 @@ namespace ShikenMatrix.ViewModels
                 {
                     _isRunning = value;
                     OnPropertyChanged(nameof(IsRunning));
-                    OnPropertyChanged(nameof(StatusIndicatorColor));
                 }
             }
         }
@@ -115,20 +132,6 @@ namespace ShikenMatrix.ViewModels
                 {
                     _isConnected = value;
                     OnPropertyChanged(nameof(IsConnected));
-                    OnPropertyChanged(nameof(StatusIndicatorColor));
-                }
-            }
-        }
-
-        public string StatusMessage
-        {
-            get => _statusMessage;
-            set
-            {
-                if (_statusMessage != value)
-                {
-                    _statusMessage = value;
-                    OnPropertyChanged(nameof(StatusMessage));
                 }
             }
         }
@@ -148,6 +151,45 @@ namespace ShikenMatrix.ViewModels
         }
 
         public bool HasError => !string.IsNullOrEmpty(LastError);
+
+        // Separate status indicators
+        public string MonitorStatus
+        {
+            get => _monitorStatus;
+            set
+            {
+                if (_monitorStatus != value)
+                {
+                    _monitorStatus = value;
+                    OnPropertyChanged(nameof(MonitorStatus));
+                    OnPropertyChanged(nameof(MonitorStatusColor));
+                }
+            }
+        }
+
+        public string ApiStatus
+        {
+            get => _apiStatus;
+            set
+            {
+                if (_apiStatus != value)
+                {
+                    _apiStatus = value;
+                    OnPropertyChanged(nameof(ApiStatus));
+                    OnPropertyChanged(nameof(ApiStatusColor));
+                }
+            }
+        }
+
+        public string MonitorStatusColor =>
+            MonitorStatus == MonitorStoppedStatus ? "Gray" :
+            MonitorStatus == MonitorRunningStatus ? "Green" : "Orange";
+
+        public string ApiStatusColor =>
+            ApiStatus == ApiDisconnectedStatus ? "Gray" :
+            ApiStatus == ApiErrorStatus ? "Red" :
+            ApiStatus == ApiConnectingStatus ? "Orange" :
+            ApiStatus == ApiConnectedStatus ? "Green" : "Gray";
 
         // Permissions
         public bool HasAccessibilityPermission
@@ -207,6 +249,20 @@ namespace ShikenMatrix.ViewModels
 
         public bool HasData => CurrentWindow != null || CurrentMedia != null;
 
+        // Version
+        public string Version
+        {
+            get => _version;
+            set
+            {
+                if (_version != value)
+                {
+                    _version = value;
+                    OnPropertyChanged(nameof(Version));
+                }
+            }
+        }
+
         // UI Logic
         public string SearchText
         {
@@ -244,22 +300,19 @@ namespace ShikenMatrix.ViewModels
                 if (string.IsNullOrWhiteSpace(SearchText))
                     return Logs;
 
+                // Create filtered collection only when needed
                 var filtered = new ObservableCollection<LogEntry>();
+                var searchLower = SearchText.ToLowerInvariant();
                 foreach (var log in Logs)
                 {
-                    if (log.Message.Contains(SearchText, StringComparison.OrdinalIgnoreCase))
+                    if (log.Message.Contains(searchLower, StringComparison.OrdinalIgnoreCase))
                         filtered.Add(log);
                 }
                 return filtered;
             }
         }
 
-        // Computed Properties
-        public string StatusIndicatorColor =>
-            !IsRunning ? "Gray" : (IsConnected ? "Green" : "Orange");
-
         #endregion
-
         #region Commands
 
         public void ToggleReporter()
@@ -319,7 +372,8 @@ namespace ShikenMatrix.ViewModels
             if (_bridge.StartReporter(Config))
             {
                 IsRunning = true;
-                StatusMessage = "启动中...";
+                MonitorStatus = MonitorRunningStatus;
+                ApiStatus = ApiConnectingStatus;
                 LastError = null;
 
                 // Setup callbacks after starting (reporter must exist first)
@@ -332,6 +386,8 @@ namespace ShikenMatrix.ViewModels
             {
                 AddLog("启动 Reporter 失败", SmLogLevel.Error);
                 Config.Enabled = false;
+                MonitorStatus = MonitorReadyStatus;
+                ApiStatus = ApiErrorStatus;
             }
         }
 
@@ -341,7 +397,8 @@ namespace ShikenMatrix.ViewModels
             {
                 IsRunning = false;
                 IsConnected = false;
-                StatusMessage = "已停止";
+                MonitorStatus = MonitorStoppedStatus;
+                ApiStatus = ApiDisconnectedStatus;
                 CurrentWindow = null;
                 CurrentMedia = null;
                 LastError = null;
@@ -398,8 +455,6 @@ namespace ShikenMatrix.ViewModels
 
         private void AddLog(string message, SmLogLevel level)
         {
-            System.Diagnostics.Debug.WriteLine($"[MainViewModel] AddLog: [{level}] {message}");
-            
             var log = new LogEntry
             {
                 Timestamp = DateTime.Now,
@@ -409,41 +464,7 @@ namespace ShikenMatrix.ViewModels
 
             Logs.Add(log);
 
-            // Aggressive cleanup: keep only last 200 logs
-            if (Logs.Count > 200)
-            {
-                for (int i = 0; i < 100; i++)
-                {
-                    Logs.RemoveAt(0);
-                }
-            }
-
-            OnPropertyChanged(nameof(FilteredLogs));
-        }
-
-        private void OnStatusTimerTick(object? sender, object e)
-        {
-            if (!IsRunning)
-                return;
-
-            var status = _bridge.GetStatus();
-
-            if (status.IsConnected != IsConnected)
-            {
-                IsConnected = status.IsConnected;
-                StatusMessage = IsConnected ? "运行中" : "连接中断";
-            }
-
-            if (status.LastError != null && status.LastError != LastError)
-            {
-                LastError = status.LastError;
-                AddLog($"错误: {status.LastError}", SmLogLevel.Error);
-            }
-        }
-
-        private void OnLogCleanupTimerTick(object? sender, object e)
-        {
-            // Keep only last 200 logs
+            // Keep last 200 logs - remove oldest when limit exceeded
             if (Logs.Count > 200)
             {
                 int removeCount = Logs.Count - 200;
@@ -453,17 +474,34 @@ namespace ShikenMatrix.ViewModels
                 }
             }
 
-            // Remove logs older than 2 minutes
-            var cutoff = DateTime.Now.AddMinutes(-2);
-            for (int i = Logs.Count - 1; i >= 0; i--)
+            // Only notify if search is active
+            if (!string.IsNullOrWhiteSpace(SearchText))
             {
-                if (Logs[i].Timestamp < cutoff)
-                {
-                    Logs.RemoveAt(i);
-                }
+                OnPropertyChanged(nameof(FilteredLogs));
+            }
+        }
+
+        private void OnStatusTimerTick(object? sender, object e)
+        {
+            if (!IsRunning)
+                return;
+
+            var status = _bridge.GetStatus();
+
+            // Update connection status based on actual WebSocket state
+            if (status.IsConnected != IsConnected)
+            {
+                IsConnected = status.IsConnected;
+                ApiStatus = IsConnected ? ApiConnectedStatus : ApiConnectingStatus;
             }
 
-            OnPropertyChanged(nameof(FilteredLogs));
+            // Handle errors
+            if (status.LastError != null && status.LastError != LastError)
+            {
+                LastError = status.LastError;
+                ApiStatus = ApiErrorStatus;
+                AddLog($"错误: {status.LastError}", SmLogLevel.Error);
+            }
         }
 
         #endregion
@@ -476,23 +514,37 @@ namespace ShikenMatrix.ViewModels
             if (_bridge.IsRunning())
             {
                 IsRunning = true;
+                MonitorStatus = MonitorRunningStatus;
+                ApiStatus = ApiConnectingStatus;
                 SetupCallbacks();
                 _statusTimer.Start();
                 CheckPermissions();
             }
-
-            // Start log cleanup timer
-            _logCleanupTimer.Start();
+            else
+            {
+                MonitorStatus = MonitorReadyStatus;
+                ApiStatus = ApiDisconnectedStatus;
+            }
         }
 
         public void OnUnloaded()
         {
             // Stop timers
-            _statusTimer.Stop();
-            _logCleanupTimer.Stop();
+            if (_statusTimer != null)
+            {
+                _statusTimer.Stop();
+                _statusTimer.Tick -= OnStatusTimerTick;
+            }
 
             // Clear callbacks to prevent memory leaks
             _bridge.ClearCallbacks();
+            
+            // Clear collections to free memory
+            Logs.Clear();
+            
+            // Force final GC
+            GC.Collect(2, GCCollectionMode.Forced);
+            GC.WaitForPendingFinalizers();
         }
 
         #endregion

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="ShikenMatrix.Controls.StatusCard"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:ShikenMatrix.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <converters:ColorNameToBrushConverter x:Key="ColorNameToBrushConverter"/>
+        <converters:StringNotEmptyConverter x:Key="StringNotEmptyConverter"/>
+    </UserControl.Resources>
+
+    <Grid Padding="20,24,20,16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- 状态区域 -->
+        <StackPanel Grid.Row="0"
+                    Grid.Column="0"
+                    Orientation="Vertical"
+                    VerticalAlignment="Center"
+                    Spacing="8">
+            <!-- 监控状态 -->
+            <StackPanel Orientation="Vertical"
+                        Spacing="2">
+                <TextBlock Text="监控状态"
+                           FontSize="10"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                           FontWeight="Bold"/>
+                <StackPanel Orientation="Horizontal"
+                            Spacing="6">
+                    <Ellipse Width="8"
+                             Height="8"
+                             VerticalAlignment="Center"
+                             Fill="{Binding MonitorStatusColor, Converter={StaticResource ColorNameToBrushConverter}}"/>
+                    <TextBlock Text="{Binding MonitorStatus}"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- API 连接状态 -->
+            <StackPanel Orientation="Vertical"
+                        Spacing="2">
+                <TextBlock Text="API 连接"
+                           FontSize="10"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                           FontWeight="Bold"/>
+                <StackPanel Orientation="Horizontal"
+                            Spacing="6">
+                    <Ellipse Width="8"
+                             Height="8"
+                             VerticalAlignment="Center"
+                             Fill="{Binding ApiStatusColor, Converter={StaticResource ColorNameToBrushConverter}}"/>
+                    <TextBlock Text="{Binding ApiStatus}"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                </StackPanel>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- 总开关 -->
+        <ToggleSwitch Grid.Row="0"
+                      Grid.Column="1"
+                      IsOn="{Binding IsRunning, Mode=OneWay}"
+                      OffContent=""
+                      OnContent=""
+                      MinWidth="0"
+                      Toggled="OnToggleSwitchToggled"
+                      IsEnabled="{Binding Config.WsUrl, Converter={StaticResource StringNotEmptyConverter}}"
+                      ToolTipService.ToolTip="连接开关"/>
+    </Grid>
+</UserControl>

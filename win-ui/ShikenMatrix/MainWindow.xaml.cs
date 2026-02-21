@@ -26,33 +26,27 @@ namespace ShikenMatrix
             Closed += OnClosed;
 
             // Subscribe to ViewModel status changes
-            ViewModel.PropertyChanged += (s, e) =>
-            {
-                if (e.PropertyName == nameof(ViewModel.IsRunning) || e.PropertyName == nameof(ViewModel.IsConnected))
-                {
-                    UpdateTrayStatus();
-                }
-            };
+            ViewModel.PropertyChanged += OnViewModelPropertyChanged;
 
             // Initialize ViewModel
             ViewModel.OnLoaded();
         }
 
-        private void OnClosed(object sender, WindowEventArgs args)
+        private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
         {
-            ViewModel.OnUnloaded();
+            if (e.PropertyName == nameof(ViewModel.IsRunning) || e.PropertyName == nameof(ViewModel.IsConnected))
+            {
+                UpdateTrayStatus();
+            }
         }
 
-        private void OnToggleSwitchToggled(object sender, RoutedEventArgs e)
+        private void OnClosed(object sender, WindowEventArgs args)
         {
-            if (sender is Microsoft.UI.Xaml.Controls.ToggleSwitch toggleSwitch)
-            {
-                // Only act if the state mismatch (avoid loops if updated from code)
-                if (toggleSwitch.IsOn != ViewModel.IsRunning)
-                {
-                    ViewModel.ToggleReporter();
-                }
-            }
+            // Unsubscribe from events to prevent memory leaks
+            ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+            Closed -= OnClosed;
+            
+            ViewModel.OnUnloaded();
         }
 
         private void UpdateTrayStatus()
@@ -64,7 +58,6 @@ namespace ShikenMatrix
         }
 
         private Microsoft.UI.Xaml.Controls.Primitives.FlyoutBase? _githubFlyout;
-        private Windows.UI.Core.CoreCursor? _originalCursor;
 
         private void OnGitHubHoverEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
         {

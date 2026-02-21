@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="ShikenMatrix.Controls.ConfigPanel"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:ShikenMatrix.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <converters:BoolInvertConverter x:Key="BoolInvertConverter"/>
+    </UserControl.Resources>
+
+    <StackPanel Spacing="16">
+        <StackPanel Orientation="Horizontal"
+                    Spacing="6">
+            <FontIcon Glyph="&#xE713;"
+                      FontSize="12"
+                      Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+            <TextBlock Text="CONFIGURATION"
+                       Style="{StaticResource CaptionTextBlockStyle}"
+                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                       FontWeight="Bold"
+                       Opacity="0.8"/>
+        </StackPanel>
+
+        <StackPanel Spacing="12">
+            <TextBox Header="服务器地址 (Host)"
+                     Text="{Binding Config.WsUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     PlaceholderText="ws://localhost:port"
+                     FontSize="12"
+                     IsEnabled="{Binding IsRunning, Converter={StaticResource BoolInvertConverter}}"/>
+
+            <PasswordBox Header="认证令牌 (Token)"
+                         Password="{Binding Config.Token, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         PlaceholderText="Access Token"
+                         PasswordChar="•"
+                         FontSize="12"
+                         IsEnabled="{Binding IsRunning, Converter={StaticResource BoolInvertConverter}}"/>
+
+            <ToggleSwitch Header="上报媒体状态"
+                          IsOn="{Binding Config.EnableMediaReporting, Mode=TwoWay}"
+                          IsEnabled="{Binding IsRunning, Converter={StaticResource BoolInvertConverter}}"
+                          FontSize="12"/>
+        </StackPanel>
+    </StackPanel>
+</UserControl>
