@@ -1,0 +1,32 @@
+{
+  "name": "shikenmatrix",
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.33.2+sha512.a90faf6feeab71ad6c6e57f94e0fe1a12f5dcc22cd754db40ae9593eb6a3e0b6b12e3540218bb37ae083404b1f2ce6db2a4121e979829b4aff94b99f49da1cf8",
+  "description": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "vite",
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-opener": "^2.5.3",
+    "solid-js": "^1.9.12"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^8.2.0",
+    "@iconify-json/mingcute": "^1.2.7",
+    "@tauri-apps/cli": "^2.10.1",
+    "eslint": "^10.2.0",
+    "eslint-plugin-format": "^2.0.1",
+    "eslint-plugin-solid": "^0.14.5",
+    "typescript": "~6.0.3",
+    "unplugin-icons": "^23.0.1",
+    "vite": "^8.0.10",
+    "vite-plugin-solid": "^2.11.12"
+  }
+}
