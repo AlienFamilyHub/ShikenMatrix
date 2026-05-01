@@ -1,5 +1,6 @@
 import type { AppPage, ConnectionStatus, PermissionStatus } from "../types";
-import { Show } from "solid-js";
+import { createSignal, onMount, Show } from "solid-js";
+import { getVersion } from "@tauri-apps/api/app";
 import IconDashboard from "~icons/mingcute/computer-line";
 import IconMonitorOn from "~icons/mingcute/eye-2-line";
 import IconMonitorOff from "~icons/mingcute/eye-close-line";
@@ -21,12 +22,24 @@ interface AppHeaderProps {
 }
 
 export function AppHeader(props: AppHeaderProps) {
+  const [version, setVersion] = createSignal("");
+
+  onMount(async () => {
+    try {
+      setVersion(await getVersion());
+    } catch {
+      setVersion("0.0.0");
+    }
+  });
+
   return (
     <header class="app-header">
       <div class="brand">
         <img class="brand-icon" src={appIconUrl} alt="" />
         <h1>ShikenMatrix</h1>
-        <span class="version">v0.1.0</span>
+        <Show when={version()}>
+          <span class="version">v{version()}</span>
+        </Show>
       </div>
 
       <nav class="app-nav" aria-label="主导航">
