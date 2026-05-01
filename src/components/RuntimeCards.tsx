@@ -1,13 +1,13 @@
-import type { MediaView, WindowView } from '../types'
-import { Show } from 'solid-js'
-import IconComputer from '~icons/mingcute/computer-line'
-import IconInbox from '~icons/mingcute/inbox-line'
-import IconMusic from '~icons/mingcute/music-2-line'
-import { formatDuration } from '../lib/format'
+import type { MediaView, WindowView } from "../types";
+import { Show } from "solid-js";
+import IconComputer from "~icons/mingcute/computer-line";
+import IconInbox from "~icons/mingcute/inbox-line";
+import IconMusic from "~icons/mingcute/music-2-line";
+import { formatDuration } from "../lib/format";
 
 interface RuntimeCardsProps {
-  windowInfo: WindowView | null
-  mediaInfo: MediaView | null
+  windowInfo: WindowView | null;
+  mediaInfo: MediaView | null;
 }
 
 export function RuntimeCards(props: RuntimeCardsProps) {
@@ -35,12 +35,12 @@ export function RuntimeCards(props: RuntimeCardsProps) {
                   <IconComputer class="info-type-icon" />
                   当前窗口
                 </div>
-                <div class="info-title">{windowInfo().title || '未知窗口'}</div>
+                <div class="info-title">{windowInfo().title || "未知窗口"}</div>
                 <div class="info-sub">
                   {windowInfo().process_name}
-                  {' '}
+                  {" "}
                   · PID
-                  {' '}
+                  {" "}
                   {windowInfo().pid}
                 </div>
               </div>
@@ -69,13 +69,13 @@ export function RuntimeCards(props: RuntimeCardsProps) {
                   <IconMusic class="info-type-icon" />
                   媒体播放
                 </div>
-                <div class="info-title">{mediaInfo().title || '未知媒体'}</div>
+                <div class="info-title">{mediaInfo().title || "未知媒体"}</div>
                 <div class="info-sub">
                   {mediaInfo().artist}
-                  {' '}
+                  {" "}
                   ·
-                  {mediaInfo().playing ? '播放中' : '已暂停'}
-                  {' '}
+                  {mediaInfo().playing ? "播放中" : "已暂停"}
+                  {" "}
                   /
                   {formatDuration(mediaInfo().elapsed_time)}
                 </div>
@@ -85,5 +85,5 @@ export function RuntimeCards(props: RuntimeCardsProps) {
         </Show>
       </div>
     </section>
-  )
+  );
 }

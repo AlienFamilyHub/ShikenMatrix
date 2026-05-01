@@ -1,12 +1,12 @@
-import { onMount } from 'solid-js'
-import gsap from 'gsap'
-import IconInfo from '~icons/mingcute/information-line'
-import IconWifi from '~icons/mingcute/wifi-line'
-import IconSend from '~icons/mingcute/send-line'
-import IconBox from '~icons/mingcute/box-line'
+import gsap from "gsap";
+import { onMount } from "solid-js";
+import IconBox from "~icons/mingcute/box-line";
+import IconInfo from "~icons/mingcute/information-line";
+import IconSend from "~icons/mingcute/send-line";
+import IconWifi from "~icons/mingcute/wifi-line";
 
 export function AboutPage() {
-  let mainRef!: HTMLElement
+  let mainRef!: HTMLElement;
 
   onMount(() => {
     gsap.from(mainRef.children, {
@@ -14,9 +14,9 @@ export function AboutPage() {
       y: 6,
       duration: 0.35,
       stagger: 0.08,
-      ease: 'power2.out',
-    })
-  })
+      ease: "power2.out",
+    });
+  });
 
   return (
     <main class="about-page" ref={mainRef}>
@@ -54,5 +54,5 @@ export function AboutPage() {
         </div>
       </section>
     </main>
-  )
+  );
 }

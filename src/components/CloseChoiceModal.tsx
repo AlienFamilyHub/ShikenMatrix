@@ -1,9 +1,9 @@
-import type { CloseBehavior } from '../types'
+import type { CloseBehavior } from "../types";
 
 interface CloseChoiceModalProps {
-  remember: boolean
-  onRememberChange: (remember: boolean) => void
-  onApply: (behavior: CloseBehavior) => void
+  remember: boolean;
+  onRememberChange: (remember: boolean) => void;
+  onApply: (behavior: CloseBehavior) => void;
 }
 
 export function CloseChoiceModal(props: CloseChoiceModalProps) {
@@ -25,14 +25,14 @@ export function CloseChoiceModal(props: CloseChoiceModalProps) {
         </label>
 
         <div class="modal-actions">
-          <button class="btn btn-secondary modal-button" onClick={() => props.onApply('quit')}>
+          <button class="btn btn-secondary modal-button" onClick={() => props.onApply("quit")}>
             直接退出
           </button>
-          <button class="btn btn-primary modal-button" onClick={() => props.onApply('hide_to_tray')}>
+          <button class="btn btn-primary modal-button" onClick={() => props.onApply("hide_to_tray")}>
             隐藏到托盘
           </button>
         </div>
       </div>
     </div>
-  )
+  );
 }

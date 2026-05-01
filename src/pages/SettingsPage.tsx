@@ -97,11 +97,10 @@ export function SettingsPage(props: SettingsPageProps) {
             <input
               type="checkbox"
               checked={props.config.enable_media_reporting}
-              onChange={(event) =>
+              onChange={event =>
                 updateConfig({
                   enable_media_reporting: event.currentTarget.checked,
-                })
-              }
+                })}
             />
             <span>上报媒体播放信息</span>
           </label>
@@ -109,13 +108,13 @@ export function SettingsPage(props: SettingsPageProps) {
 
         <Show
           when={props.config.protocol === "native"}
-          fallback={
+          fallback={(
             <MixSpaceFields
               config={props.config}
               onUpdate={updateMixSpace}
               onS3Update={updateS3}
             />
-          }
+          )}
         >
           <NativeFields config={props.config} onUpdate={updateNative} />
         </Show>
@@ -154,13 +153,13 @@ function NativeFields(props: NativeFieldsProps) {
         label="WebSocket 地址"
         value={props.config.native.ws_url}
         placeholder="wss://example.com/reporter"
-        onInput={(value) => props.onUpdate({ ws_url: value })}
+        onInput={value => props.onUpdate({ ws_url: value })}
       />
       <FormInput
         label="认证 Token"
         value={props.config.native.token}
         type="password"
-        onInput={(value) => props.onUpdate({ token: value })}
+        onInput={value => props.onUpdate({ token: value })}
       />
     </section>
   );
@@ -187,7 +186,7 @@ function MixSpaceFields(props: MixSpaceFieldsProps) {
   return (
     <div
       ref={containerRef}
-      style={{ display: "flex", "flex-direction": "column", gap: "24px" }}
+      style={{ "display": "flex", "flex-direction": "column", "gap": "24px" }}
     >
       <section class="settings-section">
         <h2>Mix-Space 协议</h2>
@@ -199,22 +198,21 @@ function MixSpaceFields(props: MixSpaceFieldsProps) {
           label="Endpoint"
           value={props.config.mix_space.endpoint}
           placeholder="https://example.com/api/process"
-          onInput={(value) => props.onUpdate({ endpoint: value })}
+          onInput={value => props.onUpdate({ endpoint: value })}
         />
         <FormInput
           label="API Token"
           value={props.config.mix_space.token}
           type="password"
-          onInput={(value) => props.onUpdate({ token: value })}
+          onInput={value => props.onUpdate({ token: value })}
         />
         <label class="form-group">
           <span>请求方法</span>
           <select
             class="form-input"
             value={props.config.mix_space.method}
-            onChange={(event) =>
-              props.onUpdate({ method: event.currentTarget.value })
-            }
+            onChange={event =>
+              props.onUpdate({ method: event.currentTarget.value })}
           >
             <option value="POST">POST</option>
             <option value="PUT">PUT</option>
@@ -244,9 +242,8 @@ function S3Fields(props: S3FieldsProps) {
         <input
           type="checkbox"
           checked={props.config.s3.enabled}
-          onChange={(event) =>
-            props.onUpdate({ enabled: event.currentTarget.checked })
-          }
+          onChange={event =>
+            props.onUpdate({ enabled: event.currentTarget.checked })}
         />
         <span>启用 S3 图标上传</span>
       </label>
@@ -254,60 +251,80 @@ function S3Fields(props: S3FieldsProps) {
         <FormInput
           label="Bucket"
           value={props.config.s3.bucket}
-          onInput={(value) => props.onUpdate({ bucket: value })}
+          onInput={value => props.onUpdate({ bucket: value })}
         />
         <FormInput
           label="Region"
           value={props.config.s3.region}
-          onInput={(value) => props.onUpdate({ region: value })}
+          onInput={value => props.onUpdate({ region: value })}
         />
         <FormInput
           label="Access Key"
           value={props.config.s3.access_key}
-          onInput={(value) => props.onUpdate({ access_key: value })}
+          onInput={value => props.onUpdate({ access_key: value })}
         />
         <FormInput
           label="Secret Key"
           value={props.config.s3.secret_key}
           type="password"
-          onInput={(value) => props.onUpdate({ secret_key: value })}
+          onInput={value => props.onUpdate({ secret_key: value })}
         />
       </div>
       <FormInput
         label="对象路径模板"
         value={props.config.s3.key_template}
         placeholder="{kind}/{Y}/{M}/{D}/{SHA}.{ext}"
-        onInput={(value) => props.onUpdate({ key_template: value })}
+        onInput={value => props.onUpdate({ key_template: value })}
       />
       <div class="variable-help">
-        <span>{"{kind}"}: app-icons / media-icons</span>
-        <span>{"{Y}"}: 年</span>
-        <span>{"{M}"}: 月</span>
-        <span>{"{D}"}: 日</span>
-        <span>{"{SHA}"}: 文件 SHA-256</span>
-        <span>{"{ext}"}: 扩展名</span>
-        <span>{"{APP}"}: 应用名</span>
+        <span>
+          {"{kind}"}
+          : app-icons / media-icons
+        </span>
+        <span>
+          {"{Y}"}
+          : 年
+        </span>
+        <span>
+          {"{M}"}
+          : 月
+        </span>
+        <span>
+          {"{D}"}
+          : 日
+        </span>
+        <span>
+          {"{SHA}"}
+          : 文件 SHA-256
+        </span>
+        <span>
+          {"{ext}"}
+          : 扩展名
+        </span>
+        <span>
+          {"{APP}"}
+          : 应用名
+        </span>
       </div>
       <FormInput
         label="生命周期天数"
         value={String(props.config.s3.lifecycle_days)}
         type="number"
         placeholder="0"
-        onInput={(value) =>
-          props.onUpdate({ lifecycle_days: Number(value) || 0 })
-        }
+        onInput={value =>
+          props.onUpdate({ lifecycle_days: Number(value) || 0 })}
       />
       <FormInput
         label="Endpoint"
         value={props.config.s3.endpoint}
         placeholder="https://account.r2.cloudflarestorage.com"
-        onInput={(value) => props.onUpdate({ endpoint: value })}
+        onInput={value => props.onUpdate({ endpoint: value })}
       />
       <FormInput
         label="Custom Domain"
         value={props.config.s3.custom_domain}
         placeholder="https://assets.example.com"
-        onInput={(value) => props.onUpdate({ custom_domain: value })}
+        onInput={value => props.onUpdate({ custom_domain: value })}
       />
     </section>
   );
@@ -330,7 +347,7 @@ function FormInput(props: FormInputProps) {
         type={props.type ?? "text"}
         value={props.value}
         placeholder={props.placeholder}
-        onInput={(event) => props.onInput(event.currentTarget.value)}
+        onInput={event => props.onInput(event.currentTarget.value)}
       />
     </label>
   );

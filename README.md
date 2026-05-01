@@ -89,15 +89,18 @@ ShikenMatrix 是一个基于 **Tauri** 构建的跨平台桌面应用程序，�
 ### 环境要求
 
 #### 通用要求
+
 - **Node.js**: v18 或更高版本
 - **包管理器**: pnpm (推荐)
 - **Rust**: 1.70 或更高版本（通过 [rustup](https://rustup.rs/) 安装）
 
 #### macOS 特有依赖
+
 - **macOS**: 11.0 Big Sur 或更高版本
 - **Xcode / Command Line Tools**: 构建原生扩展所需
 
 #### Windows 特有依赖
+
 - **Windows 10**: 版本 1809 或更高版本
 - **Visual Studio**: 含 C++ 桌面开发工作负载的构建工具
 - **Windows SDK**: 最新版本
@@ -126,6 +129,7 @@ pnpm tauri dev
 ```bash
 pnpm tauri build
 ```
+
 （构建产物将输出在 `src-tauri/target/release` 目录下，并打包为各平台的安装程序，如 `.dmg`/`.app` 或 `.msi` 等）
 
 ### 权限配置
@@ -139,6 +143,7 @@ pnpm tauri build
 3. 重启应用
 
 > 如果构建的本地区域应用出现不受信任的提示，可在终端执行：
+>
 > ```bash
 > xattr -d com.apple.quarantine /Applications/ShikenMatrix.app
 > ```
@@ -157,19 +162,19 @@ ShikenMatrix/
 │   ├── App.tsx                   # 主视图组件
 │   ├── index.tsx                 # 前端入口
 │   ├── App.css                   # 全局样式
-│   └── ... 
+│   └── ...
 │
 ├── src-tauri/                    # Tauri Rust 后端代码
 │   ├── src/
 │   │   ├── platform/             # 平台原生 API 抽象层
-│   │   │   ├── mod.rs            
+│   │   │   ├── mod.rs
 │   │   │   ├── macos/            # macOS 窗口与媒体监控 (Accessibility / MediaRemote)
 │   │   │   └── windows/          # Windows 窗口与媒体监控 (Win32 API / SMTC)
 │   │   ├── services/             # 业务核心服务
 │   │   │   ├── reporter/         # 状态监听与 WebSocket 上报
 │   │   │   └── config.rs         # 配置管理层
 │   │   ├── main.rs               # Tauri 启动入口
-│   │   └── lib.rs                
+│   │   └── lib.rs
 │   ├── Cargo.toml                # Rust 依赖配置
 │   └── tauri.conf.json           # Tauri 项目配置
 │
@@ -183,18 +188,21 @@ ShikenMatrix/
 ## 🛠️ 技术栈
 
 **前端技术**
+
 - **Solid.js** - 高性能声明式 JavaScript UI 库
 - **Vite** - 下一代前端构建工具
 - **TypeScript** - 类型安全的 JavaScript
 - **@iconify** - 统一的 SVG 图标解决方案
 
 **后端技术 (Tauri + Rust)**
+
 - **Tauri 2.0** - 高性能跨平台应用端框架
 - **tokio** / **tokio-tungstenite** - 异步运行时与 WebSocket 支持
 - **serde** & **serde_json** - 数据序列化
 - **image** - 图像处理（如图标与封面提取）
 
 **平台集成**
+
 - **macOS**:
   - `objc2` - 现代系统 Objective-C 绑定
   - `core-foundation` - 系统底层框架调用
@@ -245,5 +253,5 @@ ShikenMatrix/
 - [Tauri](https://tauri.app/) - 用于构建更小、更快、更安全的桌面应用程序。
 - [Solid.js](https://www.solidjs.com/) - 编译型响应式 UI 库。
 - [tokio](https://tokio.rs/) - 异步运行时
-- [objc2](https://github.com/madsmtm/objc2) & [windows-rs](https://github.com/microsoft/windows-rs) 
+- [objc2](https://github.com/madsmtm/objc2) & [windows-rs](https://github.com/microsoft/windows-rs)
 - [mediaremote-adapter](https://github.com/ungive/mediaremote-adapter)及[MediaRemote-rs](https://github.com/TNXG/MediaRemote-rs)

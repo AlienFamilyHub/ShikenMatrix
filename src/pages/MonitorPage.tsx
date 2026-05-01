@@ -1,20 +1,20 @@
-import type { ConnectionStatus, LogEntry, MediaView, ReporterConfig, WindowView } from '../types'
-import { LogPanel } from '../components/LogPanel'
-import { RunControls } from '../components/RunControls'
-import { RuntimeCards } from '../components/RuntimeCards'
+import type { ConnectionStatus, LogEntry, MediaView, ReporterConfig, WindowView } from "../types";
+import { LogPanel } from "../components/LogPanel";
+import { RunControls } from "../components/RunControls";
+import { RuntimeCards } from "../components/RuntimeCards";
 
 interface MonitorPageProps {
-  config: ReporterConfig
-  status: ConnectionStatus
-  logs: LogEntry[]
-  searchText: string
-  windowInfo: WindowView | null
-  mediaInfo: MediaView | null
-  onSearchTextChange: (text: string) => void
-  onClearLogs: () => void
-  onToggleMonitor: () => void
-  onToggleReporter: () => void
-  onSaveConfig: () => void
+  config: ReporterConfig;
+  status: ConnectionStatus;
+  logs: LogEntry[];
+  searchText: string;
+  windowInfo: WindowView | null;
+  mediaInfo: MediaView | null;
+  onSearchTextChange: (text: string) => void;
+  onClearLogs: () => void;
+  onToggleMonitor: () => void;
+  onToggleReporter: () => void;
+  onSaveConfig: () => void;
 }
 
 export function MonitorPage(props: MonitorPageProps) {
@@ -38,5 +38,5 @@ export function MonitorPage(props: MonitorPageProps) {
         onClear={props.onClearLogs}
       />
     </main>
-  )
+  );
 }

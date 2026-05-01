@@ -1,23 +1,23 @@
-import type { LogEntry } from '../types'
-import { For, Show } from 'solid-js'
-import IconDelete from '~icons/mingcute/delete-2-line'
-import IconInbox from '~icons/mingcute/inbox-line'
-import IconSearch from '~icons/mingcute/search-2-line'
+import type { LogEntry } from "../types";
+import { For, Show } from "solid-js";
+import IconDelete from "~icons/mingcute/delete-2-line";
+import IconInbox from "~icons/mingcute/inbox-line";
+import IconSearch from "~icons/mingcute/search-2-line";
 
 interface LogPanelProps {
-  logs: LogEntry[]
-  searchText: string
-  onSearchTextChange: (text: string) => void
-  onClear: () => void
+  logs: LogEntry[];
+  searchText: string;
+  onSearchTextChange: (text: string) => void;
+  onClear: () => void;
 }
 
 export function LogPanel(props: LogPanelProps) {
   const filteredLogs = () => {
-    const search = props.searchText.toLowerCase().trim()
+    const search = props.searchText.toLowerCase().trim();
     if (!search)
-      return props.logs
-    return props.logs.filter(log => log.message.toLowerCase().includes(search))
-  }
+      return props.logs;
+    return props.logs.filter(log => log.message.toLowerCase().includes(search));
+  };
 
   return (
     <section class="log-panel">
@@ -32,7 +32,7 @@ export function LogPanel(props: LogPanelProps) {
               onInput={event => props.onSearchTextChange(event.currentTarget.value)}
             />
           </div>
-          <button class="btn-clear" onClick={props.onClear}>
+          <button class="btn-clear" onClick={() => props.onClear()}>
             <IconDelete />
             清空
           </button>
@@ -61,5 +61,5 @@ export function LogPanel(props: LogPanelProps) {
         </Show>
       </div>
     </section>
-  )
+  );
 }
