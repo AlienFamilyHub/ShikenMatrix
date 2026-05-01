@@ -63,19 +63,21 @@ export function AppHeader(props: AppHeaderProps) {
             {props.status.is_connected ? '已就绪' : (props.status.is_reporting ? '运行中' : '未启动')}
           </span>
         </div>
-        <Show
-          when={!props.permissions.accessibility}
-          fallback={(
-            <div class="pill">
-              <IconShieldOn class="pill-icon success" />
+        <Show when={props.permissions.accessibility_required}>
+          <Show
+            when={!props.permissions.accessibility}
+            fallback={(
+              <div class="pill">
+                <IconShieldOn class="pill-icon success" />
+                <span>辅助功能</span>
+              </div>
+            )}
+          >
+            <button class="pill clickable" onClick={props.onRequestAccessibility} title="点击请求辅助功能权限">
+              <IconShieldOff class="pill-icon danger" />
               <span>辅助功能</span>
-            </div>
-          )}
-        >
-          <button class="pill clickable" onClick={props.onRequestAccessibility} title="点击请求辅助功能权限">
-            <IconShieldOff class="pill-icon danger" />
-            <span>辅助功能</span>
-          </button>
+            </button>
+          </Show>
         </Show>
         <div class="pill">
           <Show when={props.permissions.media} fallback={<IconMusic class="pill-icon danger" />}>

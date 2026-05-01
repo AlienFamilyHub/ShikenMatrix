@@ -1,8 +1,9 @@
 import { onMount } from 'solid-js'
 import gsap from 'gsap'
-import IconGithub from '~icons/mingcute/github-line'
 import IconInfo from '~icons/mingcute/information-line'
-import IconUpload from '~icons/mingcute/upload-2-line'
+import IconWifi from '~icons/mingcute/wifi-line'
+import IconSend from '~icons/mingcute/send-line'
+import IconBox from '~icons/mingcute/box-line'
 
 export function AboutPage() {
   let mainRef!: HTMLElement
@@ -10,20 +11,10 @@ export function AboutPage() {
   onMount(() => {
     gsap.from(mainRef.children, {
       opacity: 0,
-      y: 20,
-      duration: 0.6,
-      stagger: 0.15,
-      ease: 'power3.out',
-    })
-    
-    // Animate the icons inside about items
-    gsap.from(mainRef.querySelectorAll('.about-item'), {
-      opacity: 0,
-      scale: 0.95,
-      duration: 0.5,
-      stagger: 0.1,
-      delay: 0.3,
-      ease: 'back.out(1.2)'
+      y: 6,
+      duration: 0.35,
+      stagger: 0.08,
+      ease: 'power2.out',
     })
   })
 
@@ -35,30 +26,30 @@ export function AboutPage() {
         </div>
         <div>
           <h2>ShikenMatrix</h2>
-          <p>桌面活动监听与上报工具，支持独立监听、Native WebSocket 上报和 Mix-Space HTTP 上报。</p>
+          <p>桌面活动监听与上报工具。支持独立监听、Native WebSocket 上报和 Mix-Space HTTP 上报。</p>
         </div>
       </section>
 
       <section class="about-grid">
         <div class="about-item">
-          <IconUpload />
+          <IconWifi />
           <div>
             <h3>Native 方案</h3>
-            <p>使用 WebSocket 长连接实时发送窗口、媒体和封面上传事件。</p>
+            <p>WebSocket 长连接实时发送窗口、媒体和封面上传事件。</p>
           </div>
         </div>
         <div class="about-item">
-          <IconUpload />
+          <IconSend />
           <div>
             <h3>Mix-Space 方案</h3>
             <p>按 ProcessReporter 的 MixSpace payload 形状发送 HTTP JSON。</p>
           </div>
         </div>
         <div class="about-item">
-          <IconGithub />
+          <IconBox />
           <div>
             <h3>项目边界</h3>
-            <p>监听可以单独运行；启动上报必须依赖已启动的监听。</p>
+            <p>监听可以单独运行；启动上报须依赖已启动的监听。</p>
           </div>
         </div>
       </section>

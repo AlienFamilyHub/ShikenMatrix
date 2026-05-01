@@ -45,6 +45,7 @@ export interface ConnectionStatus {
 export interface PermissionStatus {
   accessibility: boolean
   media: boolean
+  accessibility_required: boolean
 }
 
 export interface LogEntry {

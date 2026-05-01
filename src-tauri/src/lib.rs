@@ -23,6 +23,7 @@ struct AppState {
 struct PermissionStatus {
     accessibility: bool,
     media: bool,
+    accessibility_required: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -181,9 +182,15 @@ fn check_permissions() -> PermissionStatus {
     #[cfg(not(target_os = "macos"))]
     let accessibility = true;
 
+    #[cfg(target_os = "macos")]
+    let accessibility_required = true;
+    #[cfg(not(target_os = "macos"))]
+    let accessibility_required = false;
+
     PermissionStatus {
         accessibility,
         media: true,
+        accessibility_required,
     }
 }
 
