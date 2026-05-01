@@ -1,13 +1,13 @@
-use super::types::{
-    build_websocket_url, ReporterConfig, ReporterMessage, ServerMessage, UploadArtworkMetaMessage,
-};
 use super::Reporter;
+use super::types::{
+    ReporterConfig, ReporterMessage, ServerMessage, UploadArtworkMetaMessage, build_websocket_url,
+};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc as tokio_mpsc;
-use tokio_tungstenite::{connect_async_tls_with_config, tungstenite::Message, Connector};
+use tokio_tungstenite::{Connector, connect_async_tls_with_config, tungstenite::Message};
 use tracing::info;
 
 impl Reporter {
@@ -253,7 +253,11 @@ fn cache_artwork_url(text: &str, artwork_urls: &Arc<RwLock<HashMap<String, Strin
         if let Ok(mut urls) = artwork_urls.write() {
             // Evict oldest entries when cache is full
             if urls.len() >= MAX_ARTWORK_CACHE {
-                let keys: Vec<String> = urls.keys().take(urls.len() - MAX_ARTWORK_CACHE + 1).cloned().collect();
+                let keys: Vec<String> = urls
+                    .keys()
+                    .take(urls.len() - MAX_ARTWORK_CACHE + 1)
+                    .cloned()
+                    .collect();
                 for key in keys {
                     urls.remove(&key);
                 }

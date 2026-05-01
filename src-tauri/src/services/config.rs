@@ -35,9 +35,11 @@ fn default_log_level() -> String {
 impl Default for ReporterConfig {
     fn default() -> Self {
         Self {
-            ws_url: String::new(),
-            token: String::new(),
+            protocol: Default::default(),
             enable_media_reporting: false,
+            native: Default::default(),
+            mix_space: Default::default(),
+            s3: Default::default(),
         }
     }
 }
@@ -73,7 +75,8 @@ pub fn load_config() -> AppConfig {
 
     match fs::read_to_string(&path) {
         Ok(content) => match toml::from_str(&content) {
-            Ok(config) => {
+            Ok(mut config) => {
+                migrate_flat_reporter_config(&mut config, &content);
                 info!("Config loaded successfully: {}", path.display());
                 config
             }
@@ -86,6 +89,77 @@ pub fn load_config() -> AppConfig {
             info!("Failed to read config: {}, using defaults", e);
             AppConfig::default()
         }
+    }
+}
+
+fn migrate_flat_reporter_config(config: &mut AppConfig, content: &str) {
+    let Ok(value) = content.parse::<toml::Value>() else {
+        return;
+    };
+    let Some(reporter) = value.get("reporter") else {
+        return;
+    };
+
+    fill_string_if_empty(&mut config.reporter.native.ws_url, reporter, "ws_url");
+    fill_string_if_empty(&mut config.reporter.native.token, reporter, "token");
+    fill_string_if_empty(
+        &mut config.reporter.mix_space.endpoint,
+        reporter,
+        "mix_space_endpoint",
+    );
+    fill_string_if_empty(
+        &mut config.reporter.mix_space.method,
+        reporter,
+        "mix_space_method",
+    );
+    fill_string_if_empty(
+        &mut config.reporter.mix_space.token,
+        reporter,
+        "mix_space_token",
+    );
+    fill_string_if_empty(&mut config.reporter.s3.bucket, reporter, "s3_bucket");
+    fill_string_if_empty(&mut config.reporter.s3.region, reporter, "s3_region");
+    fill_string_if_empty(
+        &mut config.reporter.s3.access_key,
+        reporter,
+        "s3_access_key",
+    );
+    fill_string_if_empty(
+        &mut config.reporter.s3.secret_key,
+        reporter,
+        "s3_secret_key",
+    );
+    fill_string_if_empty(&mut config.reporter.s3.endpoint, reporter, "s3_endpoint");
+    fill_string_if_empty(
+        &mut config.reporter.s3.custom_domain,
+        reporter,
+        "s3_custom_domain",
+    );
+    fill_string_if_empty(
+        &mut config.reporter.s3.key_template,
+        reporter,
+        "s3_key_template",
+    );
+
+    if let Some(enabled) = reporter.get("s3_enabled").and_then(toml::Value::as_bool) {
+        config.reporter.s3.enabled = enabled;
+    }
+    if let Some(days) = reporter
+        .get("s3_lifecycle_days")
+        .and_then(toml::Value::as_integer)
+        .and_then(|value| u32::try_from(value).ok())
+    {
+        config.reporter.s3.lifecycle_days = days;
+    }
+}
+
+fn fill_string_if_empty(target: &mut String, source: &toml::Value, key: &str) {
+    if !target.is_empty() {
+        return;
+    }
+
+    if let Some(value) = source.get(key).and_then(toml::Value::as_str) {
+        *target = value.to_string();
     }
 }
 

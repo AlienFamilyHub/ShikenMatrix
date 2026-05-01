@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  installers:
+    name: Build installer packages (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+          - label: macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          - label: windows-x64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+          - label: windows-arm64
+            runner: windows-latest
+            target: aarch64-pc-windows-msvc
+            bundles: nsis,msi
+          - label: windows-ia32
+            runner: windows-latest
+            target: i686-pc-windows-msvc
+            bundles: nsis,msi
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and upload installer packages
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: ShikenMatrix v__VERSION__
+          releaseBody: |
+            ShikenMatrix desktop release with macOS DMG, Windows NSIS/MSI installers, and Windows portable executables.
+          releaseDraft: true
+          prerelease: false
+          tauriScript: pnpm tauri
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+          releaseAssetNamePattern: "[name]_[version]_[platform]_[arch][setup][ext]"
+
+  windows-portable:
+    name: Build Windows portable (${{ matrix.label }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows-x64
+            target: x86_64-pc-windows-msvc
+          - label: windows-arm64
+            target: aarch64-pc-windows-msvc
+          - label: windows-ia32
+            target: i686-pc-windows-msvc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and upload portable executable
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: ShikenMatrix v__VERSION__
+          releaseBody: |
+            ShikenMatrix desktop release with macOS DMG, Windows NSIS/MSI installers, and Windows portable executables.
+          releaseDraft: true
+          prerelease: false
+          tauriScript: pnpm tauri
+          args: --target ${{ matrix.target }} --no-bundle
+          uploadPlainBinary: true
+          releaseAssetNamePattern: "[name]_[version]_[platform]_[arch]_Portable[ext]"

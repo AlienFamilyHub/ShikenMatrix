@@ -1,20 +1,24 @@
+mod mix_space;
 mod monitor;
+mod s3;
 mod types;
 mod websocket;
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, RwLock};
+use std::sync::{Arc, RwLock, mpsc};
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{error, info, warn};
 
 use crate::platform::{MediaMetadata, PlaybackState, WindowInfo};
 
+pub use types::{LogLevel, ReporterConfig, ReporterEvent, ReporterProtocol};
 use types::{
-    compute_hash, MediaMetadataData, MediaPlaybackMessage, PlaybackStateData, ReporterMessage,
-    WindowInfoData, WindowInfoMessage,
+    MediaMetadataData, MediaPlaybackMessage, PlaybackStateData, ReporterMessage, WindowInfoData,
+    WindowInfoMessage, compute_hash,
 };
-pub use types::{LogLevel, ReporterConfig, ReporterEvent};
 
 // ---------------------------------------------------------------------------
 // Monitor — platform polling + frontend event emission
@@ -131,6 +135,7 @@ impl Monitor {
         let data = WindowInfoData {
             title: info.title.clone(),
             process_name: info.process_name.clone(),
+            icon_base64: info.icon_data.as_ref().map(|data| BASE64.encode(data)),
             icon_url: None,
             app_id: info.app_id.clone(),
             pid: info.pid as u32,
@@ -147,10 +152,7 @@ impl Monitor {
             if let Ok(guard) = self.reporter_tx.read() {
                 if let Some(tx) = guard.as_ref() {
                     if let Err(error) = tx.send(message) {
-                        self.emit_log(
-                            LogLevel::Error,
-                            format!("发送窗口信息到通道失败: {error}"),
-                        );
+                        self.emit_log(LogLevel::Error, format!("发送窗口信息到通道失败: {error}"));
                     }
                 }
             }
@@ -247,14 +249,36 @@ impl Reporter {
                     .enable_all()
                     .build()
                     .expect("Failed to create tokio runtime");
-                runtime.block_on(Self::run_reporter(
-                    config,
-                    rx,
-                    artwork_urls,
-                    is_connected,
-                    is_running,
-                    last_error,
-                ));
+                runtime.block_on(async move {
+                    let protocol = config
+                        .read()
+                        .map(|config| config.protocol)
+                        .unwrap_or_default();
+
+                    match protocol {
+                        ReporterProtocol::Native => {
+                            Self::run_reporter(
+                                config,
+                                rx,
+                                artwork_urls,
+                                is_connected,
+                                is_running,
+                                last_error,
+                            )
+                            .await;
+                        }
+                        ReporterProtocol::MixSpace => {
+                            Self::run_mix_space_reporter(
+                                config,
+                                rx,
+                                is_connected,
+                                is_running,
+                                last_error,
+                            )
+                            .await;
+                        }
+                    }
+                });
             });
         }
 

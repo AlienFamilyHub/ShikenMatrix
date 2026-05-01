@@ -54,6 +54,10 @@ tracing-subscriber = { version = "0.3", features = [
   "fmt"
 ] }
 image = "=0.25.10"
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls"] }
+hmac = "0.13.0"
+sha2 = "0.11.0"
+time = { version = "0.3.47", features = ["formatting"] }
 
 # macOS dependencies
 [target.'cfg(target_os = "macos")'.dependencies]

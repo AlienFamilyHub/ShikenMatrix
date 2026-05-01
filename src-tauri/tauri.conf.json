@@ -12,11 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "shikenmatrix",
-        "width": 800,
-        "height": 600,
-        "minWidth": 800,
-        "minHeight": 600
+        "title": "ShikenMatrix",
+        "width": 1024,
+        "height": 576,
+        "minWidth": 1024,
+        "minHeight": 576
       }
     ],
     "security": {

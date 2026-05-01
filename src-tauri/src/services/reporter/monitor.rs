@@ -1,12 +1,12 @@
-use super::types::LogLevel;
 use super::Monitor;
+use super::types::LogLevel;
 use crate::platform::{MediaMetadata, PlaybackState, WindowInfo};
 use std::sync::atomic::Ordering;
 
 #[cfg(target_os = "windows")]
-use base64::engine::general_purpose::STANDARD as BASE64;
-#[cfg(target_os = "windows")]
 use base64::Engine;
+#[cfg(target_os = "windows")]
+use base64::engine::general_purpose::STANDARD as BASE64;
 
 impl Monitor {
     pub(super) fn start_monitoring(&self) {

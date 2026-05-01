@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use tauri::{
     image::Image,
-    menu::{MenuBuilder, MenuItemBuilder},
+    menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State, WindowEvent,
 };
@@ -271,13 +271,86 @@ fn set_macos_application_icon() {
     }
 }
 
+fn setup_app_menu(app: &mut tauri::App) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let about_item = MenuItemBuilder::with_id("navigate_about", "关于 ShikenMatrix").build(app)?;
+        let settings_item = MenuItemBuilder::with_id("navigate_settings", "偏好设置...")
+            .accelerator("Cmd+,")
+            .build(app)?;
+            
+        let sep = PredefinedMenuItem::separator(app)?;
+        let services = PredefinedMenuItem::services(app, None)?;
+        let hide = PredefinedMenuItem::hide(app, None)?;
+        let hide_others = PredefinedMenuItem::hide_others(app, None)?;
+        let show_all = PredefinedMenuItem::show_all(app, None)?;
+        let quit = PredefinedMenuItem::quit(app, None)?;
+
+        let app_submenu = SubmenuBuilder::new(app, "ShikenMatrix")
+            .item(&about_item)
+            .item(&sep)
+            .item(&settings_item)
+            .item(&sep)
+            .item(&services)
+            .item(&sep)
+            .item(&hide)
+            .item(&hide_others)
+            .item(&show_all)
+            .item(&sep)
+            .item(&quit)
+            .build()?;
+
+        let edit_submenu = SubmenuBuilder::new(app, "编辑")
+            .undo()
+            .redo()
+            .separator()
+            .cut()
+            .copy()
+            .paste()
+            .select_all()
+            .build()?;
+
+        let window_submenu = SubmenuBuilder::new(app, "窗口")
+            .minimize()
+            .separator()
+            .close_window()
+            .build()?;
+
+        let menu = MenuBuilder::new(app)
+            .item(&app_submenu)
+            .item(&edit_submenu)
+            .item(&window_submenu)
+            .build()?;
+
+        app.set_menu(menu)?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_tracing();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .setup(setup_tray)
+        .setup(|app| {
+            setup_tray(app)?;
+            setup_app_menu(app)?;
+            Ok(())
+        })
+        .on_menu_event(|app, event| {
+            match event.id().as_ref() {
+                "navigate_about" => {
+                    let _ = app.emit("navigate", "about");
+                    show_main_window(app);
+                }
+                "navigate_settings" => {
+                    let _ = app.emit("navigate", "settings");
+                    show_main_window(app);
+                }
+                _ => {}
+            }
+        })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 match load_config().close_behavior {
