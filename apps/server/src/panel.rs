@@ -1,15 +1,19 @@
 use axum::Json;
 use axum::body::Body;
-use axum::extract::{OriginalUri, Path, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{OriginalUri, Path, Query, State};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
+use futures_util::{Stream, stream};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
-use jsonwebtoken::{encode, Header, EncodingKey, decode, DecodingKey, Validation};
 
-use crate::state::SharedDashboardState;
-use crate::storage::UpstreamSettings;
+use crate::state::{ClientSnapshot, SharedDashboardState};
+use crate::storage::{AccessSettings, UpstreamSettings};
 
 #[derive(RustEmbed)]
 #[folder = "../panel/dist"]
@@ -36,7 +40,10 @@ pub async fn api_login(
     State(state): State<SharedDashboardState>,
     Json(payload): Json<LoginRequest>,
 ) -> impl IntoResponse {
-    if state.storage().verify_user(&payload.username, &payload.password) {
+    if state
+        .storage()
+        .verify_user(&payload.username, &payload.password)
+    {
         let expiration = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -47,12 +54,28 @@ pub async fn api_login(
             exp: expiration,
         };
         let secret = state.storage().get_jwt_secret();
-        match encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())) {
-            Ok(token) => (StatusCode::OK, Json(serde_json::json!(LoginResponse { token }))).into_response(),
-            Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": "token generation failed" }))).into_response()
+        match encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        ) {
+            Ok(token) => (
+                StatusCode::OK,
+                Json(serde_json::json!(LoginResponse { token })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "token generation failed" })),
+            )
+                .into_response(),
         }
     } else {
-        (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "invalid username or password" }))).into_response()
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "invalid username or password" })),
+        )
+            .into_response()
     }
 }
 
@@ -70,8 +93,99 @@ pub async fn api_state(
     axum::Json(state.snapshot()).into_response()
 }
 
-pub async fn api_share(State(state): State<SharedDashboardState>) -> impl IntoResponse {
-    axum::Json(state.public_snapshot())
+pub async fn api_share_desktop(State(state): State<SharedDashboardState>) -> impl IntoResponse {
+    axum::Json(state.desktop_share_snapshot())
+}
+
+pub async fn api_share_mobile(State(state): State<SharedDashboardState>) -> impl IntoResponse {
+    axum::Json(state.mobile_share_snapshot())
+}
+
+pub async fn api_share_desktop_events(
+    State(state): State<SharedDashboardState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    share_events(state, "desktop", |state| state.desktop_share_snapshot())
+}
+
+pub async fn api_share_mobile_events(
+    State(state): State<SharedDashboardState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    share_events(state, "mobile", |state| state.mobile_share_snapshot())
+}
+
+#[derive(Deserialize)]
+pub struct AssetQuery {
+    id: String,
+}
+
+pub async fn api_asset(
+    State(state): State<SharedDashboardState>,
+    Query(query): Query<AssetQuery>,
+) -> Response {
+    let Some(asset) = state.cached_asset(&query.id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Ok(data) = std::fs::read(&asset.path) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(&asset.mime_type)
+            .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store, max-age=0"),
+    );
+
+    (headers, data).into_response()
+}
+
+fn share_events(
+    state: SharedDashboardState,
+    event_name: &'static str,
+    snapshot: impl Fn(&SharedDashboardState) -> ClientSnapshot + Clone + Send + 'static,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let receiver = state.subscribe_share_updates();
+    let events = stream::unfold(
+        (state, receiver, true, snapshot),
+        move |(state, mut receiver, is_initial, snapshot)| async move {
+            if !is_initial && receiver.changed().await.is_err() {
+                return None;
+            }
+
+            let Ok(data) = serde_json::to_string(&snapshot(&state)) else {
+                return None;
+            };
+
+            Some((
+                Ok(Event::default().event(event_name).data(data)),
+                (state, receiver, false, snapshot),
+            ))
+        },
+    );
+
+    Sse::new(events).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    )
+}
+
+pub async fn api_get_upstream(
+    State(state): State<SharedDashboardState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !is_admin_authorized(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "admin token required" })),
+        )
+            .into_response();
+    }
+    Json(state.upstream_settings()).into_response()
 }
 
 pub async fn api_save_upstream(
@@ -88,7 +202,159 @@ pub async fn api_save_upstream(
     }
 
     match state.save_upstream_settings(settings) {
-        Ok(()) => Json(state.snapshot()).into_response(),
+        Ok(()) => Json(state.upstream_settings()).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn api_get_access(
+    State(state): State<SharedDashboardState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !is_admin_authorized(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "admin token required" })),
+        )
+            .into_response();
+    }
+    Json(state.access_settings()).into_response()
+}
+
+pub async fn api_save_access(
+    State(state): State<SharedDashboardState>,
+    headers: HeaderMap,
+    Json(settings): Json<AccessSettings>,
+) -> impl IntoResponse {
+    if !is_admin_authorized(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "admin token required" })),
+        )
+            .into_response();
+    }
+    // Clamp the activity log limit to a sane range.
+    let mut settings = settings;
+    if settings.activity_log_limit == 0 {
+        settings.activity_log_limit = 120;
+    }
+    settings.activity_log_limit = settings.activity_log_limit.clamp(1, 10_000);
+    match state.save_access_settings(settings.clone()) {
+        Ok(()) => Json(state.access_settings()).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    current_password: String,
+    new_password: String,
+}
+
+pub async fn api_change_password(
+    State(state): State<SharedDashboardState>,
+    headers: HeaderMap,
+    Json(payload): Json<ChangePasswordRequest>,
+) -> impl IntoResponse {
+    let username = match admin_username(&state, &headers) {
+        Some(username) => username,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "admin token required" })),
+            )
+                .into_response();
+        }
+    };
+    match state.storage().change_password(
+        &username,
+        &payload.current_password,
+        &payload.new_password,
+    ) {
+        Ok(()) => Json(serde_json::json!({ "success": true })).into_response(),
+        Err(error) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": error })),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Serialize)]
+struct DataResponse {
+    total_events: u64,
+    total_messages: u64,
+    window_info_count: u64,
+    media_playback_count: u64,
+    artwork_uploads: u64,
+    upstream_errors: u64,
+}
+
+pub async fn api_get_data(
+    State(state): State<SharedDashboardState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !is_admin_authorized(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "admin token required" })),
+        )
+            .into_response();
+    }
+    let snapshot = state.snapshot();
+    Json(DataResponse {
+        total_events: state.storage().count_activity(),
+        total_messages: snapshot.stats.total_messages,
+        window_info_count: snapshot.stats.window_info_count,
+        media_playback_count: snapshot.stats.media_playback_count,
+        artwork_uploads: snapshot.stats.artwork_uploads,
+        upstream_errors: snapshot.stats.upstream_errors,
+    })
+    .into_response()
+}
+
+pub async fn api_clear_activity(
+    State(state): State<SharedDashboardState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !is_admin_authorized(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "admin token required" })),
+        )
+            .into_response();
+    }
+    match state.clear_activity_log() {
+        Ok(()) => Json(serde_json::json!({ "success": true })).into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": error })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn api_reset_stats(
+    State(state): State<SharedDashboardState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if !is_admin_authorized(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "admin token required" })),
+        )
+            .into_response();
+    }
+    match state.reset_stats() {
+        Ok(()) => Json(serde_json::json!({ "success": true })).into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": error })),
@@ -107,7 +373,11 @@ pub async fn api_get_client_keys(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     if !is_admin_authorized(&state, &headers) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "unauthorized" }))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "unauthorized" })),
+        )
+            .into_response();
     }
     Json(state.storage().get_client_keys()).into_response()
 }
@@ -118,11 +388,19 @@ pub async fn api_create_client_key(
     Json(payload): Json<CreateClientKeyRequest>,
 ) -> impl IntoResponse {
     if !is_admin_authorized(&state, &headers) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "unauthorized" }))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "unauthorized" })),
+        )
+            .into_response();
     }
     match state.storage().create_client_key(&payload.description) {
         Ok(key) => Json(serde_json::json!({ "api_key": key })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -132,11 +410,19 @@ pub async fn api_delete_client_key(
     Path(id): Path<u64>,
 ) -> impl IntoResponse {
     if !is_admin_authorized(&state, &headers) {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "unauthorized" }))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "unauthorized" })),
+        )
+            .into_response();
     }
     match state.storage().delete_client_key(id) {
         Ok(_) => Json(serde_json::json!({ "success": true })).into_response(),
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({ "error": e }))).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
     }
 }
 
@@ -157,11 +443,15 @@ pub async fn api_health(State(state): State<SharedDashboardState>) -> impl IntoR
 }
 
 fn is_admin_authorized(state: &SharedDashboardState, headers: &HeaderMap) -> bool {
-    let Some(value) = headers.get(header::AUTHORIZATION) else {
-        return false;
-    };
-    let Ok(auth_str) = value.to_str() else { return false; };
-    if !auth_str.starts_with("Bearer ") { return false; }
+    admin_username(state, headers).is_some()
+}
+
+fn admin_username(state: &SharedDashboardState, headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?;
+    let auth_str = value.to_str().ok()?;
+    if !auth_str.starts_with("Bearer ") {
+        return None;
+    }
     let token = &auth_str[7..];
 
     let secret = state.storage().get_jwt_secret();
@@ -170,8 +460,10 @@ fn is_admin_authorized(state: &SharedDashboardState, headers: &HeaderMap) -> boo
     decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
-        &validation
-    ).is_ok()
+        &validation,
+    )
+    .ok()
+    .map(|data| data.claims.sub)
 }
 
 pub async fn panel_fallback(OriginalUri(uri): OriginalUri) -> Response {

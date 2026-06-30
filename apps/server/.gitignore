@@ -7,3 +7,6 @@
 
 # Node.js
 node_modules/
+
+# cache
+.cache

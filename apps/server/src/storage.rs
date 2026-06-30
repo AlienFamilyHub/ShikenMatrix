@@ -2,11 +2,19 @@ use crate::reporter::{ReporterConfig, ReporterProtocol};
 use crate::state::{ActivityEntry, ClientKind};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const UPSTREAM_SETTINGS_KEY: &str = "upstream_settings";
 const RUNTIME_STATE_KEY: &str = "runtime_state";
+const ACCESS_SETTINGS_KEY: &str = "access_settings";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessSettings {
+    pub accept_desktop: bool,
+    pub accept_mobile: bool,
+    pub activity_log_limit: u32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientKeyEntry {
@@ -37,24 +45,38 @@ pub struct UpstreamSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PersistedRuntimeState {
+    #[serde(default)]
     pub total_messages: u64,
+    #[serde(default)]
     pub window_info_count: u64,
+    #[serde(default)]
     pub media_playback_count: u64,
+    #[serde(default)]
     pub artwork_uploads: u64,
+    #[serde(default)]
     pub upstream_errors: u64,
+    #[serde(default)]
     pub last_activity_at: Option<u64>,
+    #[serde(default)]
     pub current_window: Option<String>,
+    #[serde(default)]
     pub current_media: Option<String>,
+    #[serde(default)]
+    pub desktop_messages: u64,
+    #[serde(default)]
+    pub mobile_messages: u64,
 }
 
 #[derive(Clone)]
 pub struct Storage {
     connection: Arc<Mutex<Connection>>,
+    database_path: PathBuf,
 }
 
 impl Storage {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
-        let connection = Connection::open(path)?;
+        let database_path = path.as_ref().to_path_buf();
+        let connection = Connection::open(&database_path)?;
         connection.execute_batch(
             r#"
             PRAGMA journal_mode = WAL;
@@ -96,11 +118,20 @@ impl Storage {
 
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
+            database_path,
         })
     }
 
+    pub fn asset_dir(&self) -> PathBuf {
+        self.database_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(".cache")
+    }
+
     fn init_defaults(connection: &Connection) -> Result<(), rusqlite::Error> {
-        let mut statement = connection.prepare("SELECT value FROM app_settings WHERE key = 'jwt_secret'")?;
+        let mut statement =
+            connection.prepare("SELECT value FROM app_settings WHERE key = 'jwt_secret'")?;
         let jwt_secret: Option<String> = statement.query_row([], |row| row.get(0)).optional()?;
         if jwt_secret.is_none() {
             let secret = generate_random_string(32);
@@ -147,6 +178,58 @@ impl Storage {
         self.save_json_setting(RUNTIME_STATE_KEY, state)
     }
 
+    pub fn load_access_settings(&self) -> AccessSettings {
+        self.load_json_setting(ACCESS_SETTINGS_KEY)
+            .unwrap_or_default()
+    }
+
+    pub fn save_access_settings(&self, settings: &AccessSettings) -> Result<(), String> {
+        self.save_json_setting(ACCESS_SETTINGS_KEY, settings)
+    }
+
+    pub fn change_password(
+        &self,
+        username: &str,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(), String> {
+        if !self.verify_user(username, current_password) {
+            return Err("current password is incorrect".to_string());
+        }
+        if new_password.trim().is_empty() {
+            return Err("new password must not be empty".to_string());
+        }
+        let hash = bcrypt::hash(new_password, bcrypt::DEFAULT_COST).map_err(|e| e.to_string())?;
+        let connection = self.connection.lock().map_err(|_| "lock error")?;
+        connection
+            .execute(
+                "UPDATE users SET password_hash = ?1 WHERE username = ?2",
+                params![hash, username],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn clear_activity(&self) -> Result<(), String> {
+        let connection = self.connection.lock().map_err(|_| "lock error")?;
+        connection
+            .execute("DELETE FROM activity_events", [])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn count_activity(&self) -> u64 {
+        let Ok(connection) = self.connection.lock() else {
+            return 0;
+        };
+        connection
+            .query_row("SELECT COUNT(*) FROM activity_events", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .map(|n| n as u64)
+            .unwrap_or(0)
+    }
+
     pub fn load_recent_activity(&self, limit: usize) -> Vec<ActivityEntry> {
         let Ok(connection) = self.connection.lock() else {
             return Vec::new();
@@ -190,11 +273,13 @@ impl Storage {
                 let Ok(connection) = self.connection.lock() else {
                     return "".to_string();
                 };
-                connection.query_row(
-                    "SELECT value FROM app_settings WHERE key = 'jwt_secret'",
-                    [],
-                    |row| row.get::<_, String>(0)
-                ).unwrap_or_default()
+                connection
+                    .query_row(
+                        "SELECT value FROM app_settings WHERE key = 'jwt_secret'",
+                        [],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap_or_default()
             })
     }
 
@@ -226,7 +311,9 @@ impl Storage {
         let Ok(connection) = self.connection.lock() else {
             return Vec::new();
         };
-        let Ok(mut stmt) = connection.prepare("SELECT id, description, api_key, created_at FROM client_keys ORDER BY id DESC") else {
+        let Ok(mut stmt) = connection.prepare(
+            "SELECT id, description, api_key, created_at FROM client_keys ORDER BY id DESC",
+        ) else {
             return Vec::new();
         };
         let rows = stmt.query_map([], |row| {
@@ -237,12 +324,15 @@ impl Storage {
                 created_at: row.get::<_, i64>(3)? as u64,
             })
         });
-        rows.map(|r| r.filter_map(Result::ok).collect()).unwrap_or_default()
+        rows.map(|r| r.filter_map(Result::ok).collect())
+            .unwrap_or_default()
     }
 
     pub fn delete_client_key(&self, id: u64) -> Result<(), String> {
         let connection = self.connection.lock().map_err(|_| "lock error")?;
-        connection.execute("DELETE FROM client_keys WHERE id = ?1", params![id as i64]).map_err(|e| e.to_string())?;
+        connection
+            .execute("DELETE FROM client_keys WHERE id = ?1", params![id as i64])
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -250,11 +340,13 @@ impl Storage {
         let Ok(connection) = self.connection.lock() else {
             return false;
         };
-        let count: i64 = connection.query_row(
-            "SELECT COUNT(*) FROM client_keys WHERE api_key = ?1",
-            params![api_key],
-            |row| row.get(0),
-        ).unwrap_or(0);
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM client_keys WHERE api_key = ?1",
+                params![api_key],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
         count > 0
     }
 
@@ -386,6 +478,16 @@ impl Default for UpstreamSettings {
     }
 }
 
+impl Default for AccessSettings {
+    fn default() -> Self {
+        Self {
+            accept_desktop: true,
+            accept_mobile: true,
+            activity_log_limit: 120,
+        }
+    }
+}
+
 fn client_kind_label(kind: ClientKind) -> &'static str {
     match kind {
         ClientKind::DesktopReporter => "desktop_reporter",
@@ -417,8 +519,10 @@ fn activity_kind_label(kind: &str) -> &'static str {
 
 fn generate_random_string(length: usize) -> String {
     let chars = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    (0..length).map(|_| {
-        let idx = rand::random::<u8>() % 62;
-        chars[idx as usize] as char
-    }).collect()
+    (0..length)
+        .map(|_| {
+            let idx = rand::random::<u8>() % 62;
+            chars[idx as usize] as char
+        })
+        .collect()
 }

@@ -7,8 +7,9 @@ mod storage;
 use axum::Router;
 use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::http::{Method, header};
 use axum::response::IntoResponse;
-use axum::routing::{get, post, delete};
+use axum::routing::{delete, get, post, put};
 use futures_util::{SinkExt, StreamExt};
 use reporter::{
     ReporterMessage, ReporterProtocol, UploadArtworkMetaMessage, run_mix_space_reporter,
@@ -19,6 +20,7 @@ use std::env;
 use std::sync::Arc;
 use storage::Storage;
 use tokio::sync::mpsc;
+use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
 
 #[tokio::main]
@@ -35,15 +37,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/health", get(health))
         .route("/api/login", post(panel::api_login))
-        .route("/api/share", get(panel::api_share))
+        .route("/api/share/desktop", get(panel::api_share_desktop))
+        .route(
+            "/api/share/desktop/events",
+            get(panel::api_share_desktop_events),
+        )
+        .route("/api/share/mobile", get(panel::api_share_mobile))
+        .route(
+            "/api/share/mobile/events",
+            get(panel::api_share_mobile_events),
+        )
+        .route("/api/assets", get(panel::api_asset))
         .route("/api/state", get(panel::api_state))
-        .route("/api/upstream", post(panel::api_save_upstream))
-        .route("/api/clients/keys", get(panel::api_get_client_keys).post(panel::api_create_client_key))
-        .route("/api/clients/keys/{id}", delete(panel::api_delete_client_key))
+        .route(
+            "/api/upstream",
+            get(panel::api_get_upstream).put(panel::api_save_upstream),
+        )
+        .route(
+            "/api/access",
+            get(panel::api_get_access).put(panel::api_save_access),
+        )
+        .route("/api/account/password", put(panel::api_change_password))
+        .route("/api/data", get(panel::api_get_data))
+        .route("/api/data/activity", delete(panel::api_clear_activity))
+        .route("/api/data/stats", post(panel::api_reset_stats))
+        .route(
+            "/api/clients/keys",
+            get(panel::api_get_client_keys).post(panel::api_create_client_key),
+        )
+        .route(
+            "/api/clients/keys/{id}",
+            delete(panel::api_delete_client_key),
+        )
         .route("/api/health", get(panel::api_health))
         .route("/reporter", get(reporter_ws))
         .route("/mobile", get(mobile::mobile_ws))
         .fallback(panel::panel_fallback)
+        .layer(cors_layer())
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
@@ -58,6 +88,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+fn cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
 }
 
 #[derive(serde::Deserialize)]
@@ -78,6 +121,13 @@ async fn reporter_ws(
     if !state.storage().verify_client_key(&key) {
         return (axum::http::StatusCode::UNAUTHORIZED, "invalid client key").into_response();
     }
+    if !state.access_settings().accept_desktop {
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            "desktop clients not accepted",
+        )
+            .into_response();
+    }
     let session = ReporterSession {
         client: query.client,
         device_id: query.device_id,
@@ -97,9 +147,11 @@ async fn handle_reporter_socket(
 ) {
     let (mut client_sender, mut client_receiver) = socket.split();
 
-    let Some((client_id, session_token)) =
-        state.add_client(ClientKind::DesktopReporter, session.client, session.device_id)
-    else {
+    let Some((client_id, session_token)) = state.add_client(
+        ClientKind::DesktopReporter,
+        session.client,
+        session.device_id,
+    ) else {
         let _ = client_sender
             .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                 code: 1008,
@@ -231,22 +283,17 @@ fn handle_client_text(
 ) -> bool {
     match serde_json::from_str::<ReporterMessageEnvelope>(text) {
         Ok(ReporterMessageEnvelope::WindowInfo(message)) => {
-            state.record_window_info(
-                client_id,
-                ClientKind::DesktopReporter,
-                &message.data.title,
-                &message.data.process_name,
-            );
+            state.record_window(client_id, ClientKind::DesktopReporter, &message.data);
             if let Some(reporter_tx) = reporter_tx {
                 let _ = reporter_tx.send(ReporterMessage::WindowInfo(message));
             }
         }
         Ok(ReporterMessageEnvelope::MediaPlayback(message)) => {
-            state.record_media_playback(
+            state.record_media(
                 client_id,
                 ClientKind::DesktopReporter,
-                message.metadata.title.as_deref(),
-                message.metadata.artist.as_deref(),
+                &message.metadata,
+                &message.playback_state,
             );
             if let Some(reporter_tx) = reporter_tx {
                 let _ = reporter_tx.send(ReporterMessage::MediaPlayback(message));

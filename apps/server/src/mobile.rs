@@ -2,7 +2,7 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
@@ -11,7 +11,7 @@ use crate::reporter::{
     UploadArtworkMetaMessage, WindowInfoData, WindowInfoMessage, run_mix_space_reporter,
     run_native_reporter,
 };
-use crate::state::{ClientKind, SharedDashboardState};
+use crate::state::{ClientKind, DeviceView, SharedDashboardState};
 
 const MOBILE_IDLE_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(90);
 
@@ -23,6 +23,13 @@ pub async fn mobile_ws(
     let key = query.key.unwrap_or_default();
     if !state.storage().verify_client_key(&key) {
         return (axum::http::StatusCode::UNAUTHORIZED, "invalid client key").into_response();
+    }
+    if !state.access_settings().accept_mobile {
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            "mobile clients not accepted",
+        )
+            .into_response();
     }
     let session = MobileSession {
         client: query.client,
@@ -49,9 +56,11 @@ async fn handle_mobile_socket(
         "mobile session established: client={:?}, device_id={:?}",
         session.client, session.device_id
     );
-    let Some((client_id, session_token)) = state
-        .add_client(ClientKind::Mobile, session.client.clone(), session.device_id.clone())
-    else {
+    let Some((client_id, session_token)) = state.add_client(
+        ClientKind::Mobile,
+        session.client.clone(),
+        session.device_id.clone(),
+    ) else {
         let _ = socket
             .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                 code: 1008,
@@ -90,12 +99,23 @@ async fn handle_mobile_socket(
                 match message {
                     Ok(Message::Text(text)) => {
                         last_seen = std::time::Instant::now();
-                        if let Ok(meta) = serde_json::from_str::<MobileArtworkMeta>(text.as_str()) {
-                            if meta.message_type == "upload_artwork_meta" {
-                                pending_artwork_meta = Some(UploadArtworkMetaMessage {
-                                    content_item_identifier: meta.content_item_identifier,
-                                    mime_type: meta.mime_type,
-                                });
+                        if let Ok(query) = serde_json::from_str::<MobileAssetCacheQuery>(text.as_str()) {
+                            if query.message_type == "asset_cache_query" {
+                                let cached = state.cached_asset(&query.content_item_identifier).is_some();
+                                if !cached {
+                                    pending_artwork_meta = Some(UploadArtworkMetaMessage {
+                                        content_item_identifier: query.content_item_identifier.clone(),
+                                        mime_type: query.mime_type.clone(),
+                                    });
+                                }
+                                let response = MobileAssetCacheStatus {
+                                    message_type: "asset_cache_status",
+                                    content_item_identifier: query.content_item_identifier,
+                                    cached,
+                                };
+                                if let Ok(payload) = serde_json::to_string(&response) {
+                                    let _ = socket_tx.send(Message::Text(payload.into())).await;
+                                }
                                 continue;
                             }
                         }
@@ -114,6 +134,11 @@ async fn handle_mobile_socket(
                     Ok(Message::Binary(data)) => {
                         last_seen = std::time::Instant::now();
                         if let Some(meta) = pending_artwork_meta.take() {
+                            state.cache_asset(
+                                meta.content_item_identifier.clone(),
+                                meta.mime_type.clone(),
+                                data.to_vec(),
+                            );
                             state.record_artwork_upload(
                                 client_id,
                                 ClientKind::Mobile,
@@ -188,6 +213,10 @@ fn forward_mobile_payload(
     }
 
     let foreground = payload.snapshot.foreground_app.unwrap_or_default();
+    let foreground_icon_url = foreground
+        .app_icon
+        .as_ref()
+        .and_then(|asset| asset_url_from_ref(state, asset));
     let process_name = foreground
         .package_name
         .clone()
@@ -197,49 +226,75 @@ fn forward_mobile_payload(
         .or_else(|| foreground.package_name.clone())
         .unwrap_or_else(|| "Android".to_string());
 
-    state.record_window_info(client_id, ClientKind::Mobile, &title, &process_name);
+    let window_data = WindowInfoData {
+        title: title.clone(),
+        process_name: process_name.clone(),
+        icon_base64: None,
+        icon_url: foreground_icon_url,
+        app_id: foreground.package_name,
+        pid: 0,
+    };
+    state.record_window(client_id, ClientKind::Mobile, &window_data);
 
     if let Some(reporter_tx) = reporter_tx {
         let _ = reporter_tx.send(ReporterMessage::WindowInfo(WindowInfoMessage {
-            data: WindowInfoData {
-                title: title.clone(),
-                process_name: process_name.clone(),
-                icon_base64: None,
-                icon_url: None,
-                app_id: foreground.package_name,
-                pid: 0,
-            },
+            data: window_data,
         }));
     }
 
     if let Some(media) = payload.snapshot.media {
-        state.record_media_playback(
-            client_id,
-            ClientKind::Mobile,
-            media.title.as_deref(),
-            media.artist.as_deref(),
-        );
+        let artwork_url = media
+            .artwork
+            .as_ref()
+            .and_then(|asset| asset_url_from_ref(state, asset))
+            .or_else(|| {
+                media
+                    .app_icon
+                    .as_ref()
+                    .and_then(|asset| asset_url_from_ref(state, asset))
+            });
+        let content_item_identifier = media
+            .artwork
+            .as_ref()
+            .and_then(|asset| asset.content_item_identifier.clone());
+        let metadata = MediaMetadataData {
+            bundle_identifier: media.package_name,
+            title: media.title,
+            artist: media.artist,
+            album: media.album,
+            duration: millis_to_seconds(media.duration),
+            artwork_url,
+            content_item_identifier,
+        };
+        let playback = PlaybackStateData {
+            playing: media.state == Some(3),
+            playback_rate: if media.state == Some(3) { 1.0 } else { 0.0 },
+            elapsed_time: millis_to_seconds(media.position),
+        };
+        state.record_media(client_id, ClientKind::Mobile, &metadata, &playback);
         if let Some(reporter_tx) = reporter_tx {
             let _ = reporter_tx.send(ReporterMessage::MediaPlayback(MediaPlaybackMessage {
-                metadata: MediaMetadataData {
-                    bundle_identifier: media.package_name,
-                    title: media.title,
-                    artist: media.artist,
-                    album: media.album,
-                    duration: media.duration.unwrap_or_default(),
-                    artwork_url: None,
-                    content_item_identifier: media
-                        .artwork
-                        .and_then(|asset| asset.content_item_identifier),
-                },
-                playback_state: PlaybackStateData {
-                    playing: media.state == Some(3),
-                    playback_rate: if media.state == Some(3) { 1.0 } else { 0.0 },
-                    elapsed_time: media.position.unwrap_or_default(),
-                },
+                metadata,
+                playback_state: playback,
             }));
         }
     }
+
+    let mut device = DeviceView::default();
+    if let Some(battery) = payload.snapshot.battery {
+        device.battery_level = Some(battery.level);
+        device.battery_charging = Some(battery.charging);
+    }
+    if let Some(network) = payload.snapshot.network {
+        device.network_wifi = Some(network.wifi);
+        device.network_cellular = Some(network.cellular);
+        device.network_vpn = Some(network.vpn);
+    }
+    if let Some(location) = payload.snapshot.coarse_location {
+        device.latitude = location.latitude;
+        device.longitude = location.longitude;
+    }
+    state.record_mobile_device(device);
 }
 
 #[derive(Debug)]
@@ -249,11 +304,19 @@ struct MobileSession {
 }
 
 #[derive(Debug, Deserialize)]
-struct MobileArtworkMeta {
+struct MobileAssetCacheQuery {
     #[serde(rename = "type")]
     message_type: String,
     content_item_identifier: String,
     mime_type: String,
+}
+
+#[derive(Debug, Serialize)]
+struct MobileAssetCacheStatus {
+    #[serde(rename = "type")]
+    message_type: &'static str,
+    content_item_identifier: String,
+    cached: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -270,11 +333,11 @@ struct AndroidSnapshot {
     #[serde(default)]
     media: Option<MediaSnapshot>,
     #[serde(default)]
-    _battery: Option<serde_json::Value>,
+    battery: Option<BatterySnapshot>,
     #[serde(default)]
-    _network: Option<serde_json::Value>,
+    network: Option<NetworkSnapshot>,
     #[serde(default, rename = "coarseLocation")]
-    _coarse_location: Option<serde_json::Value>,
+    coarse_location: Option<CoarseLocationSnapshot>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -284,7 +347,7 @@ struct ForegroundApp {
     #[serde(default)]
     label: Option<String>,
     #[serde(default, rename = "appIcon")]
-    _app_icon: Option<MobileAssetRef>,
+    app_icon: Option<MobileAssetRef>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -305,10 +368,53 @@ struct MediaSnapshot {
     state: Option<i32>,
     #[serde(default)]
     artwork: Option<MobileAssetRef>,
+    #[serde(default, rename = "appIcon")]
+    app_icon: Option<MobileAssetRef>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct BatterySnapshot {
+    #[serde(default)]
+    level: i32,
+    #[serde(default)]
+    charging: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct NetworkSnapshot {
+    #[serde(default)]
+    wifi: bool,
+    #[serde(default)]
+    cellular: bool,
+    #[serde(default)]
+    vpn: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CoarseLocationSnapshot {
+    #[serde(default)]
+    latitude: Option<f64>,
+    #[serde(default)]
+    longitude: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct MobileAssetRef {
     #[serde(default, rename = "contentItemIdentifier")]
     content_item_identifier: Option<String>,
+}
+
+fn millis_to_seconds(value: Option<f64>) -> f64 {
+    value.unwrap_or_default() / 1000.0
+}
+
+fn asset_url_from_ref(state: &SharedDashboardState, asset: &MobileAssetRef) -> Option<String> {
+    let id = asset.content_item_identifier.as_ref()?;
+    state
+        .cached_asset(id)
+        .map(|_| format!("/api/assets?id={}", url_escape(id)))
+}
+
+fn url_escape(value: &str) -> String {
+    url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
