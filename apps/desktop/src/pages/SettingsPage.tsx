@@ -63,6 +63,14 @@ export function SettingsPage(props: SettingsPageProps) {
             onInput={value => updateServer({ ws_url: value })}
           />
 
+          <FormInput
+            label="Client Key"
+            value={props.config.server.api_key}
+            placeholder="从 Server Admin 创建的客户端密钥"
+            type="password"
+            onInput={value => updateServer({ api_key: value })}
+          />
+
         </section>
       </div>
     </main>

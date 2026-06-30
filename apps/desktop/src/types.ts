@@ -4,6 +4,7 @@ export interface ReporterConfig {
 
 export interface ServerReporterConfig {
   ws_url: string;
+  api_key: string;
 }
 
 export type CloseBehavior = "hide_to_tray" | "quit";

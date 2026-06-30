@@ -2,8 +2,11 @@
 //! Persists configuration to config.toml
 
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 
 use super::ReporterConfig;
@@ -58,13 +61,19 @@ pub fn load_config() -> AppConfig {
 
     if !path.exists() {
         info!("Config file not found, using defaults");
-        return AppConfig::default();
+        let mut config = AppConfig::default();
+        normalize_config(&mut config);
+        let _ = write_config_to_path(&path, &config);
+        return config;
     }
 
     match fs::read_to_string(&path) {
         Ok(content) => match toml::from_str(&content) {
             Ok(mut config) => {
                 migrate_flat_reporter_config(&mut config, &content);
+                if normalize_config(&mut config) {
+                    let _ = write_config_to_path(&path, &config);
+                }
                 info!("Config loaded successfully: {}", path.display());
                 config
             }
@@ -93,6 +102,27 @@ fn migrate_flat_reporter_config(config: &mut AppConfig, content: &str) {
         reporter,
         "server_ws_url",
     );
+    fill_string_if_empty(
+        &mut config.reporter.server.api_key,
+        reporter,
+        "server_api_key",
+    );
+    fill_string_if_empty(&mut config.reporter.server.api_key, reporter, "api_key");
+    fill_string_if_empty(
+        &mut config.reporter.server.client,
+        reporter,
+        "client",
+    );
+    fill_string_if_empty(
+        &mut config.reporter.server.device_id,
+        reporter,
+        "device_id",
+    );
+    fill_string_if_empty(
+        &mut config.reporter.server.device_id,
+        reporter,
+        "deviceId",
+    );
 }
 
 fn fill_string_if_empty(target: &mut String, source: &toml::Value, key: &str) {
@@ -105,16 +135,56 @@ fn fill_string_if_empty(target: &mut String, source: &toml::Value, key: &str) {
     }
 }
 
+fn normalize_config(config: &mut AppConfig) -> bool {
+    let mut changed = false;
+
+    if config.reporter.server.client.is_empty() {
+        config.reporter.server.client = default_desktop_client_info();
+        changed = true;
+    }
+
+    if config.reporter.server.device_id.is_empty() {
+        config.reporter.server.device_id = generate_desktop_device_id();
+        changed = true;
+    }
+
+    changed
+}
+
+fn default_desktop_client_info() -> String {
+    format!("desktop-{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+fn generate_desktop_device_id() -> String {
+    let mut hasher = DefaultHasher::new();
+    std::env::consts::OS.hash(&mut hasher);
+    std::env::consts::ARCH.hash(&mut hasher);
+    std::process::id().hash(&mut hasher);
+    std::env::var("USER").ok().hash(&mut hasher);
+    std::env::var("USERNAME").ok().hash(&mut hasher);
+    std::env::current_exe().ok().hash(&mut hasher);
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_nanos())
+        .hash(&mut hasher);
+
+    format!("desktop_{:016x}", hasher.finish())
+}
+
 /// Save configuration
 #[allow(dead_code)]
 pub fn save_config(config: &AppConfig) -> Result<(), String> {
     let path = get_config_path();
 
+    write_config_to_path(&path, config)
+}
+
+fn write_config_to_path(path: &PathBuf, config: &AppConfig) -> Result<(), String> {
     let content =
         toml::to_string_pretty(config).map_err(|e| format!("Failed to serialize config: {}", e))?;
 
     info!("Writing config to: {}", path.display());
-    info!("Config content:\n{}", content);
 
     fs::write(&path, content).map_err(|e| format!("Failed to write config file: {}", e))?;
 

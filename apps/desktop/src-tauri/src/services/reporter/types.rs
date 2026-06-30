@@ -13,6 +13,12 @@ pub struct ReporterConfig {
 pub struct ServerReporterConfig {
     #[serde(default = "default_server_ws_url")]
     pub ws_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default = "default_desktop_client_info")]
+    pub client: String,
+    #[serde(default)]
+    pub device_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -152,12 +158,19 @@ impl Default for ServerReporterConfig {
     fn default() -> Self {
         Self {
             ws_url: default_server_ws_url(),
+            api_key: String::new(),
+            client: default_desktop_client_info(),
+            device_id: String::new(),
         }
     }
 }
 
 fn default_server_ws_url() -> String {
     "ws://127.0.0.1:4317/reporter".to_string()
+}
+
+pub(super) fn default_desktop_client_info() -> String {
+    format!("desktop-{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
 impl Default for ReporterConfig {
@@ -180,5 +193,18 @@ pub(super) fn build_server_websocket_url(config: &ReporterConfig) -> Result<Url,
         .ws_url
         .replace("http://", "ws://")
         .replace("https://", "wss://");
-    Url::parse(&ws_url)
+    let mut url = Url::parse(&ws_url)?;
+    if !config.server.api_key.is_empty() {
+        url.query_pairs_mut()
+            .append_pair("key", config.server.api_key.as_str());
+    }
+    if !config.server.client.is_empty() {
+        url.query_pairs_mut()
+            .append_pair("client", config.server.client.as_str());
+    }
+    if !config.server.device_id.is_empty() {
+        url.query_pairs_mut()
+            .append_pair("deviceId", config.server.device_id.as_str());
+    }
+    Ok(url)
 }
