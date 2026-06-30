@@ -60,11 +60,11 @@ internal fun DashboardTab(
         label = "dashboardHeaderProgress",
     )
     val expandedTitleTop = contentPadding.calculateTopPadding()
-    val collapsedTitleTop = (expandedTitleTop - 44.dp).coerceAtLeast(0.dp)
+    val collapsedTitleTop = (expandedTitleTop - 44.dp).coerceAtLeast(8.dp)
     val animatedTitleTop = lerp(expandedTitleTop, collapsedTitleTop, headerProgress)
 
-    // 顶部纯色背景：高度跟随当前标题位置，确保色块始终把标题下方滚动内容死死遮住
-    val scrimBarHeight = animatedTitleTop + 16.dp
+    // 顶部纯色背景：覆盖标题区域并向下延伸遮住滚动内容
+    val scrimBarHeight = animatedTitleTop + 32.dp
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(

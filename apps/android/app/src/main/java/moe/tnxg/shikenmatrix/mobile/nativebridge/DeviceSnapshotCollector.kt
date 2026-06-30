@@ -5,6 +5,7 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -106,9 +107,18 @@ class DeviceSnapshotCollector(private val context: Context) {
         val battery = JSONObject()
         val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as BatteryManager
         battery.put("level", batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY))
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            battery.put("charging", batteryManager.isCharging)
-        }
+
+        // BatteryManager.isCharging 在新版 Android 上常滞后/为 false（充满、脉冲间隙等），
+        // 改用 ACTION_BATTERY_CHANGED 粘性广播的 status/plugged，各版本通用且可靠。
+        val intent = runCatching {
+            context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        }.getOrNull()
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        val plugged = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+            status == BatteryManager.BATTERY_STATUS_FULL ||
+            plugged != 0
+        battery.put("charging", charging)
         return battery
     }
 

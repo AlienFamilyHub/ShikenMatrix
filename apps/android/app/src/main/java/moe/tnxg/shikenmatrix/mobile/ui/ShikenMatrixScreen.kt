@@ -34,6 +34,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import moe.tnxg.shikenmatrix.mobile.MainActivity
 import moe.tnxg.shikenmatrix.mobile.nativebridge.BackgroundReporter
 import moe.tnxg.shikenmatrix.mobile.nativebridge.DeviceSnapshot
@@ -119,6 +120,19 @@ internal fun ShikenMatrixScreen(
         onDispose {
             BackgroundReporter.onSnapshotCollected = previousObserver
             BackgroundReporter.onConnectionChanged = previousConnectionObserver
+        }
+    }
+
+    // 进入隐私页时自动探测 root，已授权则不再显示申请按钮
+    LaunchedEffect(selectedTab) {
+        if (selectedTab != 2) return@LaunchedEffect
+        if (rootGranted) return@LaunchedEffect
+        val result = withContext(Dispatchers.IO) { requestRoot() }
+        val isGranted = (result as? JSONObject)?.optBoolean("granted", false) == true
+        val message = (result as? JSONObject)?.optString("message").orEmpty()
+        if (isGranted) {
+            rootGranted = true
+            rootMessage = message.ifBlank { "Root 已授权" }
         }
     }
 
