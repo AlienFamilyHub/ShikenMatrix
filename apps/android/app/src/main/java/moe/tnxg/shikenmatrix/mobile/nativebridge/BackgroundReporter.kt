@@ -10,7 +10,9 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import okio.ByteString.Companion.toByteString
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
@@ -31,7 +33,8 @@ object BackgroundReporter {
 
     @Volatile
     private var lastSuccessfulReportAtMs: Long = 0L
-    private val sentAssetIds = mutableSetOf<String>()
+    private val confirmedCachedAssetIds = ConcurrentHashMap.newKeySet<String>()
+    private val pendingAssetProbes = ConcurrentHashMap<String, AssetCacheProbe>()
     private var executor: ScheduledExecutorService? = null
 
     @Volatile
@@ -156,7 +159,8 @@ object BackgroundReporter {
         onConnectionChanged?.invoke(false)
         lastReportedStateKey = null
         lastSuccessfulReportAtMs = 0L
-        sentAssetIds.clear()
+        confirmedCachedAssetIds.clear()
+        pendingAssetProbes.clear()
         sessionConfig = null
         sessionContext = null
     }
@@ -230,7 +234,18 @@ object BackgroundReporter {
                     reconnectScheduled = false
                     reconnectStrategy.reset()
                     lastReportedStateKey = null
+                    confirmedCachedAssetIds.clear()
                     onConnectionChanged?.invoke(true)
+                }
+
+                override fun onMessage(webSocket: WebSocket, text: String) {
+                    val payload = runCatching { JSONObject(text) }.getOrNull() ?: return
+                    if (payload.optString("type") != "asset_cache_status") return
+
+                    val assetId = payload.optString("content_item_identifier")
+                    if (assetId.isBlank()) return
+
+                    pendingAssetProbes.remove(assetId)?.complete(payload.optBoolean("cached"))
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -277,19 +292,34 @@ object BackgroundReporter {
     }
 
     private fun sendSnapshot(socket: WebSocket, snapshot: DeviceSnapshot, deviceId: String): Boolean {
-        snapshot.assets.filterNot { asset -> asset.id in sentAssetIds }.forEach { asset ->
-            val metaSent = socket.send(
+        snapshot.assets.filterNot { asset -> asset.id in confirmedCachedAssetIds }.forEach { asset ->
+            val cacheProbe = AssetCacheProbe()
+            pendingAssetProbes[asset.id] = cacheProbe
+            val querySent = socket.send(
                 JSONObject()
-                    .put("type", "upload_artwork_meta")
+                    .put("type", "asset_cache_query")
                     .put("content_item_identifier", asset.id)
                     .put("mime_type", asset.mimeType)
                     .toString(),
             )
-            val assetSent = socket.send(asset.bytes.toByteString())
-            if (!metaSent || !assetSent) {
+            if (!querySent) {
+                pendingAssetProbes.remove(asset.id)
                 return false
             }
-            sentAssetIds.add(asset.id)
+
+            // 必须等服务端确认 miss 后再传二进制，否则服务端无法把 binary 绑定到正确资源。
+            if (!cacheProbe.await()) {
+                pendingAssetProbes.remove(asset.id)
+                return false
+            }
+
+            if (!cacheProbe.cached) {
+                val assetSent = socket.send(asset.bytes.toByteString())
+                if (!assetSent) {
+                    return false
+                }
+            }
+            confirmedCachedAssetIds.add(asset.id)
         }
 
         return socket.send(
@@ -299,6 +329,21 @@ object BackgroundReporter {
                 .put("snapshot", snapshot.json)
                 .toString(),
         )
+    }
+
+    private class AssetCacheProbe {
+        private val latch = CountDownLatch(1)
+
+        @Volatile
+        var cached: Boolean = false
+            private set
+
+        fun complete(value: Boolean) {
+            cached = value
+            latch.countDown()
+        }
+
+        fun await(): Boolean = latch.await(2, TimeUnit.SECONDS)
     }
 
     private data class ReporterSessionConfig(
