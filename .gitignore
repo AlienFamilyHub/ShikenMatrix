@@ -19,6 +19,9 @@ Cargo.lock
 *.rlib
 *.rmeta
 
+# === Server Cache ===
+apps/server/.cache/
+
 # === Tauri / Build ===
 src-tauri/gen/
 AppBundle/
