@@ -2,34 +2,34 @@
   "name": "shikenmatrix",
   "type": "module",
   "version": "2.0.0",
+  "private": true,
   "packageManager": "pnpm@10.33.2+sha512.a90faf6feeab71ad6c6e57f94e0fe1a12f5dcc22cd754db40ae9593eb6a3e0b6b12e3540218bb37ae083404b1f2ce6db2a4121e979829b4aff94b99f49da1cf8",
-  "description": "",
+  "description": "A modern cross-platform desktop window & media info display tool.",
   "license": "MIT",
   "scripts": {
-    "start": "vite",
-    "dev": "vite",
-    "build": "vite build",
-    "serve": "vite preview",
-    "tauri": "tauri"
-  },
-  "dependencies": {
-    "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-opener": "^2.5.3",
-    "gsap": "^3.15.0",
-    "solid-js": "^1.9.12"
+    "dev": "turbo dev",
+    "dev:panel": "turbo dev --filter=@shikenmatrix/panel --filter=@shikenmatrix/server",
+    "dev:panel:ui": "pnpm --filter @shikenmatrix/panel dev",
+    "dev:server": "pnpm --filter @shikenmatrix/server dev",
+    "dev:desktop": "pnpm --filter @shikenmatrix/desktop dev",
+    "dev:tauri": "pnpm --filter @shikenmatrix/desktop dev:tauri",
+    "build": "turbo build",
+    "build:panel": "turbo build --filter=@shikenmatrix/panel...",
+    "build:server": "turbo build --filter=@shikenmatrix/server...",
+    "build:desktop": "turbo build --filter=@shikenmatrix/desktop...",
+    "build:tauri": "pnpm --filter @shikenmatrix/desktop build:tauri",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "tauri": "pnpm --filter @shikenmatrix/desktop tauri",
+    "clean": "turbo clean"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^8.2.0",
-    "@iconify-json/mingcute": "^1.2.7",
-    "@tauri-apps/cli": "^2.10.1",
-    "@types/node": "^25.6.0",
     "eslint": "^10.2.0",
     "eslint-plugin-format": "^2.0.1",
     "eslint-plugin-solid": "^0.14.5",
     "jiti": "^2.6.1",
-    "typescript": "~6.0.3",
-    "unplugin-icons": "^23.0.1",
-    "vite": "^8.0.10",
-    "vite-plugin-solid": "^2.11.12"
+    "turbo": "^2.10.0",
+    "typescript": "~6.0.3"
   }
 }

@@ -1,0 +1,19 @@
+{
+  "name": "@shikenmatrix/server",
+  "type": "module",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ShikenMatrix server (TBD)",
+  "license": "MIT",
+  "scripts": {
+    "dev": "cargo run",
+    "dev:release": "cargo run --release",
+    "build": "cargo build --release",
+    "lint": "cargo clippy --all-targets --all-features",
+    "typecheck": "cargo check",
+    "clean": "cargo clean"
+  },
+  "dependencies": {
+    "@shikenmatrix/panel": "workspace:*"
+  }
+}

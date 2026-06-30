@@ -3,6 +3,14 @@ import antfu from "@antfu/eslint-config";
 export default antfu({
   formatters: true,
   solid: true,
+  ignores: [
+    "**/dist/**",
+    "**/build/**",
+    "**/target/**",
+    "**/gen/**",
+    "**/.turbo/**",
+    "**/node_modules/**",
+  ],
   stylistic: {
     indent: 2,
     quotes: "double",

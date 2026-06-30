@@ -1,0 +1,32 @@
+{
+  "name": "@shikenmatrix/panel",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ShikenMatrix server dashboard panel (Solid.js)",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@solidjs/router": "^0.16.1",
+    "solid-js": "^1.9.12"
+  },
+  "devDependencies": {
+    "@iconify-json/mingcute": "^1.2.7",
+    "@tailwindcss/vite": "^4.3.2",
+    "@types/node": "^25.6.0",
+    "eslint": "^10.2.0",
+    "rimraf": "^6.0.1",
+    "tailwindcss": "^4.3.2",
+    "typescript": "~6.0.3",
+    "unplugin-icons": "^23.0.1",
+    "vite": "^8.0.10",
+    "vite-plugin-solid": "^2.11.12"
+  }
+}

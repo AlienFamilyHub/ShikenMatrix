@@ -1,0 +1,58 @@
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "org.jetbrains.kotlin.plugin.compose"
+
+def enableProguardInReleaseBuilds = false
+
+android {
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+
+    namespace "moe.tnxg.shikenmatrix.mobile"
+    defaultConfig {
+        applicationId "moe.tnxg.shikenmatrix.mobile"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+    }
+    buildFeatures {
+        compose true
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    signingConfigs {
+        debug {
+            storeFile file("debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+kotlin {
+    jvmToolchain(17)
+}
+
+dependencies {
+    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation("androidx.compose.foundation:foundation:1.10.0")
+    implementation("androidx.compose.ui:ui:1.10.0")
+    implementation("top.yukonga.miuix.kmp:miuix-ui:0.9.2")
+    implementation("top.yukonga.miuix.kmp:miuix-icons:0.9.2")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+}

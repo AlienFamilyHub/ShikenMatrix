@@ -8,6 +8,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# === Turborepo ===
+.turbo/
+
 # === Rust / Cargo ===
 src-tauri/target/
 Cargo.lock
@@ -47,6 +50,11 @@ desktop.ini
 # === IDE Extensions ===
 .eslintcache
 .stylelintcache
+
+# === Database ===
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 
 # === Testing ===
 coverage/

@@ -1,0 +1,9 @@
+/target/
+
+# Database
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Node.js
+node_modules/

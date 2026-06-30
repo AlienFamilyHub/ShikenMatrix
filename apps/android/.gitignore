@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Node.js
+node_modules/
+
+# Android / Gradle
+build/
+**/build/
+.gradle/
+.kotlin/
+.cxx/
+local.properties
+*.hprof
+
+# IDE
+.idea/
+*.iml
+
+# Signing
+*.keystore
+!app/debug.keystore
