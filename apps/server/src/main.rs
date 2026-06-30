@@ -63,6 +63,10 @@ async fn health() -> &'static str {
 #[derive(serde::Deserialize)]
 struct ReporterQuery {
     key: Option<String>,
+    #[serde(default)]
+    client: Option<String>,
+    #[serde(default, rename = "deviceId")]
+    device_id: Option<String>,
 }
 
 async fn reporter_ws(
@@ -74,13 +78,28 @@ async fn reporter_ws(
     if !state.storage().verify_client_key(&key) {
         return (axum::http::StatusCode::UNAUTHORIZED, "invalid client key").into_response();
     }
-    upgrade.on_upgrade(move |socket| handle_reporter_socket(socket, state))
+    let session = ReporterSession {
+        client: query.client,
+        device_id: query.device_id,
+    };
+    upgrade.on_upgrade(move |socket| handle_reporter_socket(socket, state, session))
 }
 
-async fn handle_reporter_socket(socket: WebSocket, state: SharedDashboardState) {
+struct ReporterSession {
+    client: Option<String>,
+    device_id: Option<String>,
+}
+
+async fn handle_reporter_socket(
+    socket: WebSocket,
+    state: SharedDashboardState,
+    session: ReporterSession,
+) {
     let (mut client_sender, mut client_receiver) = socket.split();
 
-    let Some((client_id, session_token)) = state.add_client(ClientKind::DesktopReporter, None, None) else {
+    let Some((client_id, session_token)) =
+        state.add_client(ClientKind::DesktopReporter, session.client, session.device_id)
+    else {
         let _ = client_sender
             .send(Message::Close(Some(axum::extract::ws::CloseFrame {
                 code: 1008,

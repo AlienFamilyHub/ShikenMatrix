@@ -13,6 +13,8 @@ use crate::reporter::{
 };
 use crate::state::{ClientKind, SharedDashboardState};
 
+const MOBILE_IDLE_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(90);
+
 pub async fn mobile_ws(
     State(state): State<SharedDashboardState>,
     axum::extract::Query(query): axum::extract::Query<MobileQuery>,
@@ -22,19 +24,31 @@ pub async fn mobile_ws(
     if !state.storage().verify_client_key(&key) {
         return (axum::http::StatusCode::UNAUTHORIZED, "invalid client key").into_response();
     }
-    upgrade.on_upgrade(move |socket| handle_mobile_socket(socket, state))
+    let session = MobileSession {
+        client: query.client,
+        device_id: query.device_id,
+    };
+    upgrade.on_upgrade(move |socket| handle_mobile_socket(socket, state, session))
 }
 
 #[derive(serde::Deserialize)]
 pub(crate) struct MobileQuery {
     key: Option<String>,
+    #[serde(default)]
+    client: Option<String>,
+    #[serde(default, rename = "deviceId")]
+    device_id: Option<String>,
 }
 
-async fn handle_mobile_socket(mut socket: WebSocket, state: SharedDashboardState) {
-    let Some(session) = receive_mobile_hello(&mut socket).await else {
-        warn!("mobile client disconnected before secure hello");
-        return;
-    };
+async fn handle_mobile_socket(
+    mut socket: WebSocket,
+    state: SharedDashboardState,
+    session: MobileSession,
+) {
+    info!(
+        "mobile session established: client={:?}, device_id={:?}",
+        session.client, session.device_id
+    );
     let Some((client_id, session_token)) = state
         .add_client(ClientKind::Mobile, session.client.clone(), session.device_id.clone())
     else {
@@ -49,18 +63,11 @@ async fn handle_mobile_socket(mut socket: WebSocket, state: SharedDashboardState
     let reporter_tx = start_mobile_reporter(&state);
     let mut pending_artwork_meta: Option<UploadArtworkMetaMessage> = None;
 
-    let _ = socket
-        .send(Message::Text(
-            r#"{"type":"mobile_hello_ack","encrypted":false}"#.into(),
-        ))
-        .await;
-
-    // 心跳：每 20s 发 Ping，超过 60s 未收到任何帧则关闭半开连接
+    // 心跳：屏幕休眠后 NAT/系统可能静默丢连接，用 ping + idle timeout 尽快释放半开连接。
     let (mut socket_tx, mut socket_rx) = socket.split();
     let mut heartbeat = tokio::time::interval(tokio::time::Duration::from_secs(20));
     heartbeat.reset();
     let mut last_seen = std::time::Instant::now();
-    let idle_timeout = tokio::time::Duration::from_secs(60);
 
     loop {
         tokio::select! {
@@ -68,7 +75,7 @@ async fn handle_mobile_socket(mut socket: WebSocket, state: SharedDashboardState
                 if socket_tx.send(Message::Ping(vec![].into())).await.is_err() {
                     break;
                 }
-                if last_seen.elapsed() > idle_timeout {
+                if last_seen.elapsed() > MOBILE_IDLE_TIMEOUT {
                     warn!("mobile client idle timeout, closing");
                     let _ = socket_tx
                         .send(Message::Close(Some(axum::extract::ws::CloseFrame {
@@ -126,7 +133,7 @@ async fn handle_mobile_socket(mut socket: WebSocket, state: SharedDashboardState
                     }
                     Ok(Message::Close(_)) => break,
                     Err(error) => {
-                        warn!("mobile websocket error: {error}");
+                        info!("mobile websocket closed: {error}");
                         break;
                     }
                 }
@@ -235,54 +242,9 @@ fn forward_mobile_payload(
     }
 }
 
-async fn receive_mobile_hello(socket: &mut WebSocket) -> Option<MobileSession> {
-    while let Some(message) = socket.next().await {
-        match message {
-            Ok(Message::Text(text)) => {
-                let Ok(hello) = serde_json::from_str::<MobileHello>(text.as_str()) else {
-                    warn!("invalid mobile hello");
-                    continue;
-                };
-                if hello.message_type != "mobile_hello" {
-                    warn!("invalid mobile hello type");
-                    continue;
-                }
-
-                let session = MobileSession {
-                    client: hello.client,
-                    device_id: hello.device_id,
-                };
-                info!(
-                    "mobile secure session established: client={:?}, device_id={:?}",
-                    session.client, session.device_id
-                );
-                return Some(session);
-            }
-            Ok(Message::Close(_)) => return None,
-            Err(error) => {
-                warn!("mobile hello receive failed: {error}");
-                return None;
-            }
-            _ => {}
-        }
-    }
-
-    None
-}
-
 #[derive(Debug)]
 struct MobileSession {
     client: Option<String>,
-    device_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MobileHello {
-    #[serde(rename = "type")]
-    message_type: String,
-    #[serde(default)]
-    client: Option<String>,
-    #[serde(default, rename = "deviceId")]
     device_id: Option<String>,
 }
 
