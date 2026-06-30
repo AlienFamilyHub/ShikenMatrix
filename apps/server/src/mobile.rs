@@ -15,13 +15,23 @@ use crate::state::{ClientKind, SharedDashboardState};
 
 pub async fn mobile_ws(
     State(state): State<SharedDashboardState>,
+    axum::extract::Query(query): axum::extract::Query<MobileQuery>,
     upgrade: WebSocketUpgrade,
 ) -> impl IntoResponse {
+    let key = query.key.unwrap_or_default();
+    if !state.storage().verify_client_key(&key) {
+        return (axum::http::StatusCode::UNAUTHORIZED, "invalid client key").into_response();
+    }
     upgrade.on_upgrade(move |socket| handle_mobile_socket(socket, state))
 }
 
+#[derive(serde::Deserialize)]
+pub(crate) struct MobileQuery {
+    key: Option<String>,
+}
+
 async fn handle_mobile_socket(mut socket: WebSocket, state: SharedDashboardState) {
-    let Some(session) = receive_mobile_hello(&mut socket, &state).await else {
+    let Some(session) = receive_mobile_hello(&mut socket).await else {
         warn!("mobile client disconnected before secure hello");
         return;
     };
@@ -225,7 +235,7 @@ fn forward_mobile_payload(
     }
 }
 
-async fn receive_mobile_hello(socket: &mut WebSocket, state: &SharedDashboardState) -> Option<MobileSession> {
+async fn receive_mobile_hello(socket: &mut WebSocket) -> Option<MobileSession> {
     while let Some(message) = socket.next().await {
         match message {
             Ok(Message::Text(text)) => {
@@ -238,24 +248,13 @@ async fn receive_mobile_hello(socket: &mut WebSocket, state: &SharedDashboardSta
                     continue;
                 }
 
-                let key_id = hello.key_id.unwrap_or_default();
-                if !state.storage().verify_client_key(&key_id) {
-                    warn!("invalid mobile key_id: {key_id}");
-                    let _ = socket.send(Message::Close(Some(axum::extract::ws::CloseFrame {
-                        code: 1008,
-                        reason: "invalid client key".into(),
-                    }))).await;
-                    return None;
-                }
-
                 let session = MobileSession {
                     client: hello.client,
                     device_id: hello.device_id,
-                    key_id: Some(key_id),
                 };
                 info!(
-                    "mobile secure session established: client={:?}, device_id={:?}, key_id={:?}",
-                    session.client, session.device_id, session.key_id
+                    "mobile secure session established: client={:?}, device_id={:?}",
+                    session.client, session.device_id
                 );
                 return Some(session);
             }
@@ -275,7 +274,6 @@ async fn receive_mobile_hello(socket: &mut WebSocket, state: &SharedDashboardSta
 struct MobileSession {
     client: Option<String>,
     device_id: Option<String>,
-    key_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -286,8 +284,6 @@ struct MobileHello {
     client: Option<String>,
     #[serde(default, rename = "deviceId")]
     device_id: Option<String>,
-    #[serde(default, rename = "keyId")]
-    key_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

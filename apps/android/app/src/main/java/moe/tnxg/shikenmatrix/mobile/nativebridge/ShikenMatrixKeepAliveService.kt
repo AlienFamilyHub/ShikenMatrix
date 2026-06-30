@@ -22,6 +22,8 @@ class ShikenMatrixKeepAliveService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     KeepAliveController.refreshWatchdogIfEnabled(this)
     BackgroundReporter.start(this)
+    // 进程被系统从 Doze 唤醒拉起 —— 主动做一次健康检查
+    BackgroundReporter.healthCheck()
     return START_STICKY
   }
 

@@ -112,7 +112,9 @@ class MainActivity : ComponentActivity() {
   }
 
   private fun openSocket(inv: ConnectInvocation) {
-    val request = Request.Builder().url(inv.serverUrl).build()
+    val authedUrl =
+      Uri.parse(inv.serverUrl).buildUpon().appendQueryParameter("key", inv.apiKey).build().toString()
+    val request = Request.Builder().url(authedUrl).build()
     websocket = httpClient.newWebSocket(
       request,
       object : WebSocketListener() {
@@ -122,7 +124,6 @@ class MainActivity : ComponentActivity() {
               .put("type", "mobile_hello")
               .put("client", "android-compose")
               .put("deviceId", deviceId)
-              .put("keyId", inv.apiKey)
               .toString(),
           )
           reconnectStrategy.reset()

@@ -1,6 +1,7 @@
 package moe.tnxg.shikenmatrix.mobile.nativebridge
 
 import android.content.Context
+import android.net.Uri
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -129,8 +130,30 @@ object BackgroundReporter {
     KeepAliveController.startServiceIfEnabled(context)
   }
 
+  /**
+   * 健康检查：在系统从 Doze/休眠中唤醒我们时调用。
+   * - 若 WS 已断开 (null 或失败的输出缓冲持续堆积) 则立即重连；
+   * - 否则保持现状，OkHttp 的 pingInterval 仍在维持 keepalive。
+   */
+  fun healthCheck() {
+    if (!shouldReconnect) return
+    val cfg = sessionConfig ?: return
+    val ctx = sessionContext ?: return
+    val current = websocket
+    // null 已断；queueSize 持续堆积意味着对端不读——半开，强制重连
+    val needsReconnect = current == null || current.queueSize() > 256 * 1024L
+    if (needsReconnect) {
+      current?.close(1001, "health-check")
+      websocket = null
+      reconnectStrategy.reset()
+      connect(ctx, cfg)
+    }
+  }
+
   private fun connect(context: Context, config: ReporterSessionConfig): WebSocket? {
-    val request = Request.Builder().url(config.serverUrl).build()
+    val authedUrl =
+      Uri.parse(config.serverUrl).buildUpon().appendQueryParameter("key", config.apiKey).build().toString()
+    val request = Request.Builder().url(authedUrl).build()
     val deviceId = DeviceIdentity.deviceId(context)
     websocket = client.newWebSocket(
       request,
@@ -141,7 +164,6 @@ object BackgroundReporter {
               .put("type", "mobile_hello")
               .put("client", "android-service")
               .put("deviceId", deviceId)
-              .put("keyId", config.apiKey)
               .toString(),
           )
           reconnectStrategy.reset()

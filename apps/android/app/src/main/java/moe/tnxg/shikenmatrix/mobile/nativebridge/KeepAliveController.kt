@@ -10,7 +10,13 @@ import android.os.SystemClock
 object KeepAliveController {
   private const val PREFS = "shikenmatrix_keep_alive"
   private const val KEY_ENABLED = "enabled"
-  private const val WATCHDOG_INTERVAL_MS = 60_000L
+
+  /**
+   * Doze 维护窗口通常以 1, 2, 4, 8 分钟递增展开。
+   * 设为 4 分钟能在不频繁打扰用户的前提下保证后台最快在 ~8 分钟内被唤醒，
+   * 同时避免触发系统对"高频精确闹钟"的限制。
+   */
+  private const val WATCHDOG_INTERVAL_MS = 4 * 60 * 1000L
 
   const val ACTION_WATCHDOG = "moe.tnxg.shikenmatrix.mobile.action.WATCHDOG"
 
@@ -41,6 +47,7 @@ object KeepAliveController {
     if (!isEnabled(context)) return
 
     startServiceIfEnabled(context)
+    // 每次被系统唤醒后重新排一次，让闹钟持续在 Doze 维护窗口触发
     scheduleWatchdog(context)
   }
 
@@ -66,14 +73,27 @@ object KeepAliveController {
     }
   }
 
+  /**
+   * 一次性排程，在 Doze 模式下也尽量在最近一次维护窗口触发。
+   * 不用 setInexactRepeating——它在 Doze 下完全不触发。
+   */
   private fun scheduleWatchdog(context: Context) {
     val alarmManager = context.getSystemService(AlarmManager::class.java)
-    alarmManager.setInexactRepeating(
-      AlarmManager.ELAPSED_REALTIME_WAKEUP,
-      SystemClock.elapsedRealtime() + WATCHDOG_INTERVAL_MS,
-      WATCHDOG_INTERVAL_MS,
-      watchdogIntent(context),
-    )
+    val triggerAt = SystemClock.elapsedRealtime() + WATCHDOG_INTERVAL_MS
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      // Android 12 (API 31) 起需要 SCHEDULE_EXACT_ALARM，setAndAllowWhileIdle 不受此限。
+      alarmManager.setAndAllowWhileIdle(
+        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+        triggerAt,
+        watchdogIntent(context),
+      )
+    } else {
+      alarmManager.setExact(
+        AlarmManager.ELAPSED_REALTIME_WAKEUP,
+        triggerAt,
+        watchdogIntent(context),
+      )
+    }
   }
 
   private fun cancelWatchdog(context: Context) {
