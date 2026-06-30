@@ -2,6 +2,8 @@
 node_modules/
 dist/
 build/
+out/
+.next/
 *.tsbuildinfo
 pnpm-debug.log*
 npm-debug.log*
