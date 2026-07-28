@@ -338,6 +338,15 @@ fn setup_app_menu(app: &mut tauri::App) -> tauri::Result<()> {
 pub fn run() {
     init_tracing();
 
+    // reqwest's "rustls" feature transitively enables rustls/aws-lc-rs, which
+    // coexists with the "ring" feature declared in Cargo.toml. With both crypto
+    // provider features enabled, rustls cannot pick a process-level default and
+    // `ClientConfig::builder()` panics, killing the native WebSocket reporter
+    // thread before any connection is attempted (every later report then fails
+    // with "channel closed"). Install ring explicitly so provider selection is
+    // deterministic.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
