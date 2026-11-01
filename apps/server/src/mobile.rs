@@ -123,7 +123,7 @@ async fn handle_mobile_socket(
                         match parse_mobile_payload(&session, text.as_str()) {
                             Ok(payload) => {
                                 info!("mobile payload received: {}", payload.message_type);
-                                forward_mobile_payload(payload, reporter_tx.as_ref(), &state, client_id);
+                                forward_mobile_payload(payload, reporter_tx.as_ref(), &state, client_id, session_token);
                             }
                             Err(error) => warn!("mobile payload parse failed: {error}"),
                         }
@@ -207,6 +207,7 @@ fn forward_mobile_payload(
     reporter_tx: Option<&mpsc::UnboundedSender<ReporterMessage>>,
     state: &SharedDashboardState,
     client_id: u64,
+    session_token: u64,
 ) {
     if payload.message_type != "android_snapshot" {
         return;
@@ -234,15 +235,8 @@ fn forward_mobile_payload(
         app_id: foreground.package_name,
         pid: 0,
     };
-    state.record_window(client_id, ClientKind::Mobile, &window_data);
 
-    if let Some(reporter_tx) = reporter_tx {
-        let _ = reporter_tx.send(ReporterMessage::WindowInfo(WindowInfoMessage {
-            data: window_data,
-        }));
-    }
-
-    if let Some(media) = payload.snapshot.media {
+    let media_data = payload.snapshot.media.map(|media| {
         let artwork_url = media
             .artwork
             .as_ref()
@@ -271,14 +265,8 @@ fn forward_mobile_payload(
             playback_rate: if media.state == Some(3) { 1.0 } else { 0.0 },
             elapsed_time: millis_to_seconds(media.position),
         };
-        state.record_media(client_id, ClientKind::Mobile, &metadata, &playback);
-        if let Some(reporter_tx) = reporter_tx {
-            let _ = reporter_tx.send(ReporterMessage::MediaPlayback(MediaPlaybackMessage {
-                metadata,
-                playback_state: playback,
-            }));
-        }
-    }
+        (metadata, playback)
+    });
 
     let mut device = DeviceView::default();
     if let Some(battery) = payload.snapshot.battery {
@@ -294,7 +282,27 @@ fn forward_mobile_payload(
         device.latitude = location.latitude;
         device.longitude = location.longitude;
     }
-    state.record_mobile_device(device);
+    if !state.record_mobile_snapshot(
+        client_id,
+        session_token,
+        payload.snapshot.screen_off,
+        &window_data,
+        media_data.as_ref().map(|(metadata, playback)| (metadata, playback)),
+        device,
+    ) {
+        return;
+    }
+    if let Some(reporter_tx) = reporter_tx {
+        let _ = reporter_tx.send(ReporterMessage::WindowInfo(WindowInfoMessage {
+            data: window_data,
+        }));
+        if let Some((metadata, playback_state)) = media_data {
+            let _ = reporter_tx.send(ReporterMessage::MediaPlayback(MediaPlaybackMessage {
+                metadata,
+                playback_state,
+            }));
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -328,6 +336,8 @@ struct MobilePayload {
 
 #[derive(Debug, Default, Deserialize)]
 struct AndroidSnapshot {
+    #[serde(default, rename = "screenOff")]
+    screen_off: Option<bool>,
     #[serde(default, rename = "foregroundApp")]
     foreground_app: Option<ForegroundApp>,
     #[serde(default)]
@@ -417,4 +427,255 @@ fn asset_url_from_ref(state: &SharedDashboardState, asset: &MobileAssetRef) -> O
 
 fn url_escape(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::DashboardState;
+    use crate::storage::Storage;
+    use serde_json::{Value, json};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(1);
+
+    struct TestDirectory(PathBuf);
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).expect("remove test directory");
+        }
+    }
+
+    struct TestServer {
+        state: SharedDashboardState,
+        _directory: TestDirectory,
+    }
+
+    impl TestServer {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "shikenmatrix-mobile-{}-{}",
+                std::process::id(),
+                NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&path).expect("create test directory");
+            let directory = TestDirectory(path);
+            let storage = Storage::open(directory.0.join("state.sqlite3")).expect("open storage");
+            Self {
+                state: Arc::new(DashboardState::new("127.0.0.1:0".to_string(), storage)),
+                _directory: directory,
+            }
+        }
+
+        fn connect(&self) -> (u64, u64) {
+            self.state
+                .add_client(
+                    ClientKind::Mobile,
+                    Some("Test Android".to_string()),
+                    Some("test-phone".to_string()),
+                )
+                .expect("accept mobile connection")
+        }
+
+        fn deliver(&self, connection: (u64, u64), text: &str) {
+            let session = MobileSession {
+                client: Some("Test Android".to_string()),
+                device_id: Some("test-phone".to_string()),
+            };
+            let payload = parse_mobile_payload(&session, text).expect("parse actual mobile JSON");
+            forward_mobile_payload(payload, None, &self.state, connection.0, connection.1);
+        }
+    }
+
+    async fn mobile_api(state: &SharedDashboardState) -> Value {
+        let response = crate::panel::api_share_mobile(State(state.clone()))
+            .await
+            .into_response();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read mobile API body");
+        serde_json::from_slice(&body).expect("decode mobile API JSON")
+    }
+
+    #[tokio::test]
+    async fn screen_off_remains_online_and_updates_public_device_and_media() {
+        let server = TestServer::new();
+        let connection = server.connect();
+        server.deliver(
+            connection,
+            r#"{"type":"android_snapshot","snapshot":{
+                "screenOff":false,
+                "foregroundApp":{"packageName":"org.example.player","label":"Player"},
+                "media":{"title":"Bright track","artist":"Artist","state":3,"position":10000},
+                "battery":{"level":81,"charging":false},
+                "network":{"wifi":true,"cellular":false,"vpn":false},
+                "coarseLocation":{"latitude":31.2,"longitude":121.4}
+            }}"#,
+        );
+        let bright = mobile_api(&server.state).await;
+        assert_eq!(bright["status"]["is_online"], json!(true));
+        assert_eq!(bright["status"].get("screen_off"), Some(&json!(false)));
+
+        server.deliver(
+            connection,
+            r#"{"type":"android_snapshot","snapshot":{
+                "screenOff":true,
+                "foregroundApp":{"packageName":"org.example.player","label":"Player"},
+                "media":{"title":"Background track","artist":"Artist","state":3,"position":20000},
+                "battery":{"level":80,"charging":true},
+                "network":{"wifi":false,"cellular":true,"vpn":true},
+                "coarseLocation":{"latitude":31.3,"longitude":121.5}
+            }}"#,
+        );
+        let off = mobile_api(&server.state).await;
+        assert_eq!(off["status"]["is_online"], json!(true));
+        assert_eq!(off["status"].get("screen_off"), Some(&json!(true)));
+        assert_eq!(server.state.snapshot().clients.len(), 1);
+        assert_eq!(off["media"]["title"], json!("Background track"));
+        assert_eq!(off["media"]["elapsed_time"], json!(20.0));
+        assert_eq!(off["media"]["playing"], json!(true));
+        assert_eq!(off["device"]["battery_level"], json!(80));
+        assert_eq!(off["device"]["battery_charging"], json!(true));
+        assert_eq!(off["device"]["network_wifi"], json!(false));
+        assert_eq!(off["device"]["network_cellular"], json!(true));
+        assert_eq!(off["device"]["network_vpn"], json!(true));
+        assert_eq!(off["device"]["latitude"], json!(31.3));
+        assert_eq!(off["device"]["longitude"], json!(121.5));
+        assert!(off["status"]["last_activity_at"].is_string());
+
+        server.deliver(
+            connection,
+            r#"{"type":"android_snapshot","snapshot":{
+                "screenOff":true,
+                "media":{"title":"Next background track","state":3,"position":64000},
+                "battery":{"level":79,"charging":false},
+                "network":{"wifi":true,"cellular":true,"vpn":false},
+                "coarseLocation":{"latitude":31.4,"longitude":121.6}
+            }}"#,
+        );
+        let updated = mobile_api(&server.state).await;
+        assert_eq!(updated["status"]["is_online"], json!(true));
+        assert_eq!(updated["status"]["screen_off"], json!(true));
+        assert_eq!(updated["media"]["title"], json!("Next background track"));
+        assert_eq!(updated["media"]["elapsed_time"], json!(64.0));
+        assert_eq!(updated["device"]["battery_level"], json!(79));
+        assert_eq!(updated["device"]["battery_charging"], json!(false));
+        assert_eq!(updated["device"]["network_wifi"], json!(true));
+        assert_eq!(updated["device"]["network_vpn"], json!(false));
+        assert_eq!(updated["device"]["latitude"], json!(31.4));
+        assert_eq!(updated["device"]["longitude"], json!(121.6));
+        assert!(
+            updated["stats"]["total_messages"].as_u64().unwrap()
+                > off["stats"]["total_messages"].as_u64().unwrap()
+        );
+
+        server.deliver(
+            connection,
+            r#"{"type":"android_snapshot","snapshot":{"screenOff":false}}"#,
+        );
+        let awake = mobile_api(&server.state).await;
+        assert_eq!(awake["status"]["is_online"], json!(true));
+        assert_eq!(awake["status"]["screen_off"], json!(false));
+        assert_eq!(server.state.snapshot().clients.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reconnect_clears_current_screen_and_rejects_old_session_updates() {
+        let server = TestServer::new();
+        let original = server.connect();
+        server.deliver(
+            original,
+            r#"{"type":"android_snapshot","snapshot":{
+                "screenOff":true,"battery":{"level":70,"charging":false}
+            }}"#,
+        );
+        let replacement = server.connect();
+        assert_eq!(replacement.0, original.0);
+        assert_ne!(replacement.1, original.1);
+        let reconnect = mobile_api(&server.state).await;
+        assert_eq!(reconnect["status"]["is_online"], json!(true));
+        assert_eq!(reconnect["status"].get("screen_off"), Some(&Value::Null));
+
+        server.deliver(
+            replacement,
+            r#"{"type":"android_snapshot","snapshot":{
+                "screenOff":false,
+                "media":{"title":"Current session","state":3,"position":5000},
+                "battery":{"level":69,"charging":true}
+            }}"#,
+        );
+        let current = mobile_api(&server.state).await;
+        server.deliver(
+            original,
+            r#"{"type":"android_snapshot","snapshot":{
+                "screenOff":true,
+                "media":{"title":"Stale session","state":2,"position":1000},
+                "battery":{"level":1,"charging":false}
+            }}"#,
+        );
+        server.state.remove_client(original.0, original.1, ClientKind::Mobile);
+        assert_eq!(mobile_api(&server.state).await, current);
+
+        server.deliver(
+            replacement,
+            r#"{"type":"android_snapshot","snapshot":{"screenOff":true}}"#,
+        );
+        let screen_off = mobile_api(&server.state).await;
+        assert_eq!(screen_off["status"]["is_online"], json!(true));
+        assert_eq!(screen_off["status"]["screen_off"], json!(true));
+        server.state.remove_client(replacement.0, replacement.1, ClientKind::Mobile);
+        let disconnected = mobile_api(&server.state).await;
+        assert_eq!(disconnected["status"]["is_online"], json!(false));
+        assert_eq!(disconnected["status"].get("screen_off"), Some(&Value::Null));
+        server.deliver(
+            replacement,
+            r#"{"type":"android_snapshot","snapshot":{"screenOff":false}}"#,
+        );
+        assert_eq!(mobile_api(&server.state).await, disconnected);
+
+        let next_connection = server.connect();
+        let next = mobile_api(&server.state).await;
+        assert_eq!(next["status"]["is_online"], json!(true));
+        assert_eq!(next["status"].get("screen_off"), Some(&Value::Null));
+        server.deliver(
+            next_connection,
+            r#"{"type":"android_snapshot","snapshot":{"screenOff":false}}"#,
+        );
+        assert_eq!(mobile_api(&server.state).await["status"]["screen_off"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn absent_screen_field_is_unknown_and_keeps_older_senders_online() {
+        let server = TestServer::new();
+        let initial = mobile_api(&server.state).await;
+        assert_eq!(initial["status"].get("screen_off"), Some(&Value::Null));
+        let connection = server.connect();
+        server.deliver(
+            connection,
+            r#"{"type":"android_snapshot","snapshot":{"battery":{"level":42,"charging":false}}}"#,
+        );
+        let legacy = mobile_api(&server.state).await;
+        assert_eq!(legacy["status"]["is_online"], json!(true));
+        assert_eq!(legacy["status"].get("screen_off"), Some(&Value::Null));
+        assert_eq!(legacy["device"]["battery_level"], json!(42));
+
+        server.deliver(
+            connection,
+            r#"{"type":"android_snapshot","snapshot":{"screenOff":true}}"#,
+        );
+        server.deliver(connection, r#"{"type":"android_snapshot","snapshot":{}}"#);
+        let unknown = mobile_api(&server.state).await;
+        assert_eq!(unknown["status"]["is_online"], json!(true));
+        assert_eq!(unknown["status"].get("screen_off"), Some(&Value::Null));
+
+        server.state
+            .add_client(ClientKind::DesktopReporter, Some("Desktop".to_string()), None)
+            .expect("accept desktop connection");
+        let desktop = serde_json::to_value(server.state.desktop_share_snapshot()).unwrap();
+        assert_eq!(desktop["status"]["is_online"], json!(true));
+        assert_eq!(desktop["status"].get("screen_off"), Some(&Value::Null));
+    }
 }

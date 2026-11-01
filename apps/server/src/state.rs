@@ -43,6 +43,8 @@ pub struct ClientEntry {
     pub client_info: Option<String>,
     pub device_id: Option<String>,
     pub session_id: u64,
+    #[serde(skip)]
+    screen_off: Option<bool>,
     pub last_window: Option<String>,
     pub last_media: Option<String>,
     pub messages: u64,
@@ -94,7 +96,7 @@ pub struct DashboardSnapshot {
     pub access: AccessSettings,
 }
 
-// --- Panel-facing view types (match apps/panel/lib/status-data.ts) ---
+// --- Panel-facing view types (match apps/panel/src/lib/types.ts) ---
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ActivityView {
@@ -129,6 +131,7 @@ pub struct DeviceView {
 #[derive(Debug, Clone, Serialize)]
 pub struct OnlineStatusView {
     pub is_online: bool,
+    pub screen_off: Option<bool>,
     pub client_kind: &'static str,
     pub device_info: Option<String>,
     pub last_activity_at: Option<String>,
@@ -246,6 +249,8 @@ pub struct DashboardState {
 
     next_client_id: AtomicU64,
     next_session_id: AtomicU64,
+    // Serialize session replacement/removal with complete mobile snapshot updates.
+    client_session_updates: Mutex<()>,
     clients: Mutex<Vec<ClientEntry>>,
     activity: Mutex<VecDeque<ActivityEntry>>,
     assets: Mutex<AssetCache>,
@@ -298,6 +303,7 @@ impl DashboardState {
             mobile_runtime: Mutex::new(MobileRuntime::default()),
             next_client_id: AtomicU64::new(1),
             next_session_id: AtomicU64::new(1),
+            client_session_updates: Mutex::new(()),
             clients: Mutex::new(Vec::new()),
             activity: Mutex::new(activity),
             assets: Mutex::new(asset_cache),
@@ -346,34 +352,25 @@ impl DashboardState {
     }
 
     fn client_snapshots(&self) -> (ClientSnapshot, ClientSnapshot) {
-        let (desktop_online, mobile_online) = self
-            .clients
-            .lock()
-            .map(|clients| {
-                (
-                    clients
-                        .iter()
-                        .any(|c| c.kind == ClientKind::DesktopReporter),
-                    clients.iter().any(|c| c.kind == ClientKind::Mobile),
-                )
-            })
-            .unwrap_or((false, false));
-
-        let (desktop_info, mobile_info) = self
+        let (desktop_online, desktop_info, mobile_connected, mobile_info, mobile_screen_off) = self
             .clients
             .lock()
             .map(|clients| {
                 let desktop = clients
                     .iter()
-                    .find(|c| c.kind == ClientKind::DesktopReporter)
-                    .and_then(|c| c.client_info.clone());
+                    .find(|client| client.kind == ClientKind::DesktopReporter);
                 let mobile = clients
                     .iter()
-                    .find(|c| c.kind == ClientKind::Mobile)
-                    .and_then(|c| c.client_info.clone());
-                (desktop, mobile)
+                    .find(|client| client.kind == ClientKind::Mobile);
+                (
+                    desktop.is_some(),
+                    desktop.and_then(|client| client.client_info.clone()),
+                    mobile.is_some(),
+                    mobile.and_then(|client| client.client_info.clone()),
+                    mobile.and_then(|client| client.screen_off),
+                )
             })
-            .unwrap_or((None, None));
+            .unwrap_or((false, None, false, None, None));
 
         let (desktop_runtime, mobile_runtime) = (
             self.desktop_runtime
@@ -395,6 +392,7 @@ impl DashboardState {
             ClientSnapshot {
                 status: OnlineStatusView {
                     is_online: desktop_online,
+                    screen_off: None,
                     client_kind: ClientKind::DesktopReporter.panel_key(),
                     device_info: desktop_info,
                     last_activity_at: desktop_last_activity,
@@ -408,7 +406,8 @@ impl DashboardState {
             },
             ClientSnapshot {
                 status: OnlineStatusView {
-                    is_online: mobile_online,
+                    is_online: mobile_connected,
+                    screen_off: mobile_screen_off,
                     client_kind: ClientKind::Mobile.panel_key(),
                     device_info: mobile_info,
                     last_activity_at: mobile_last_activity,
@@ -561,6 +560,7 @@ impl DashboardState {
         client_info: Option<String>,
         device_id: Option<String>,
     ) -> Option<(u64, u64)> {
+        let _session_update = self.client_session_updates.lock().ok()?;
         let connected_at = now_unix();
 
         // 同一设备重连：复用原记录、复用客户端 ID，仅分配新会话 ID；
@@ -574,6 +574,7 @@ impl DashboardState {
                     let reused_id = existing.id;
                     let session_id = self.next_session_id.fetch_add(1, Ordering::Relaxed);
                     existing.session_id = session_id;
+                    existing.screen_off = None;
                     existing.connected_at = connected_at;
                     existing.kind = kind;
                     existing.client_info = client_info.clone();
@@ -621,6 +622,7 @@ impl DashboardState {
             client_info: client_info.clone(),
             device_id,
             session_id,
+            screen_off: None,
             last_window: None,
             last_media: None,
             messages: 0,
@@ -642,6 +644,9 @@ impl DashboardState {
     }
 
     pub fn remove_client(&self, id: u64, session_id: u64, kind: ClientKind) {
+        let Ok(_session_update) = self.client_session_updates.lock() else {
+            return;
+        };
         let removed = if let Ok(mut clients) = self.clients.lock() {
             let before = clients.len();
             clients.retain(|client| !(client.id == id && client.session_id == session_id));
@@ -784,12 +789,41 @@ impl DashboardState {
         self.persist_runtime_state();
     }
 
-    pub fn record_mobile_device(&self, device: DeviceView) {
+    pub fn record_mobile_snapshot(
+        &self,
+        client_id: u64,
+        session_id: u64,
+        screen_off: Option<bool>,
+        window: &WindowInfoData,
+        media: Option<(&MediaMetadataData, &PlaybackStateData)>,
+        device: DeviceView,
+    ) -> bool {
+        let Ok(_session_update) = self.client_session_updates.lock() else {
+            return false;
+        };
+        {
+            let Ok(mut clients) = self.clients.lock() else {
+                return false;
+            };
+            let Some(client) = clients.iter_mut().find(|client| {
+                client.id == client_id
+                    && client.session_id == session_id
+                    && client.kind == ClientKind::Mobile
+            }) else {
+                return false;
+            };
+            client.screen_off = screen_off;
+        }
+        self.record_window(client_id, ClientKind::Mobile, window);
+        if let Some((metadata, playback)) = media {
+            self.record_media(client_id, ClientKind::Mobile, metadata, playback);
+        }
         if let Ok(mut runtime) = self.mobile_runtime.lock() {
             runtime.device = Some(device);
             runtime.last_activity_at = Some(now_unix());
         }
         self.notify_share_changed();
+        true
     }
 
     pub fn record_artwork_upload(&self, client_id: u64, kind: ClientKind, content_id: &str) {
