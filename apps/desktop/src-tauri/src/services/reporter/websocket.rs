@@ -54,11 +54,15 @@ async fn connect_once(
     is_connected.store(false, Ordering::Relaxed);
 
     let connector = Connector::Rustls(Arc::new(
-        rustls::ClientConfig::builder()
-            .with_root_certificates(rustls::RootCertStore::from_iter(
-                webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-            ))
-            .with_no_client_auth(),
+        rustls::ClientConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .expect("ring supports the default TLS protocol versions")
+        .with_root_certificates(rustls::RootCertStore::from_iter(
+            webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+        ))
+        .with_no_client_auth(),
     ));
 
     let connect_result = tokio::time::timeout(

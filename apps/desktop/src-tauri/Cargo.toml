@@ -19,19 +19,19 @@ crate-type = [
 ]
 
 [build-dependencies]
-tauri-build = { version = "2.6.3", features = [] }
+tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
-tauri = { version = "2.11.3", features = [
+tauri = { version = "2.12.5", features = [
   "tray-icon",
   "image-png"
 ] }
-tauri-plugin-opener = "2.5.4"
+tauri-plugin-opener = "2.7.2"
 serde = { version = "1.0.228", features = [ "derive" ] }
 serde_json = "1.0.150"
-toml = "1.1.2"
-dirs = "6.0.0"
-base64 = "0.22.1"
+toml = "1.1.8+spec-1.1.0"
+dirs = "7.0.0"
+base64 = "0.23.1"
 tokio = { version = "1.52.3", features = [
   "rt-multi-thread",
   "sync",
@@ -39,7 +39,7 @@ tokio = { version = "1.52.3", features = [
   "macros",
   "signal",
 ], default-features = false }
-tokio-tungstenite = { version = "0.29.0", features = [
+tokio-tungstenite = { version = "0.30.0", features = [
   "rustls-tls-webpki-roots",
   "connect",
 ], default-features = false }
@@ -48,7 +48,7 @@ rustls = { version = "0.23.41", default-features = false, features = [
   "tls12",
   "ring",
 ] }
-webpki-roots = "1.0.8"
+webpki-roots = "1.0.11"
 futures-util = { version = "0.3.32", default-features = false, features = [ "std", ] }
 url = "2.5.8"
 tracing = { version = "0.1.44", default-features = false, features = [ "std" ] }
@@ -62,7 +62,7 @@ reqwest = { version = "0.13.4", default-features = false, features = [
   "rustls",
 ] }
 hmac = "0.13.0"
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 time = { version = "0.3.51", features = [ "formatting" ] }
 
 # macOS dependencies
@@ -102,4 +102,12 @@ windows = { version = "0.62.2", features = [
   "Win32_System_ProcessStatus",
   "Media_Control",
   "Storage_Streams",
+] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.14.0"
+mpris = "2.0.1"
+reqwest = { version = "0.13.4", default-features = false, features = [
+  "blocking",
+  "rustls"
 ] }

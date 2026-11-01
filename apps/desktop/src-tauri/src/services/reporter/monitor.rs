@@ -83,10 +83,7 @@ impl Monitor {
         last_media_metadata: &mut Option<MediaMetadata>,
         last_playback_state: &mut Option<PlaybackState>,
     ) {
-        let Ok(Some(metadata)) = current_media_metadata() else {
-            return;
-        };
-        let Ok(Some(state)) = current_playback_state() else {
+        let Ok(Some((metadata, state))) = current_media_info() else {
             return;
         };
 
@@ -105,7 +102,7 @@ impl Monitor {
     }
 
     fn maybe_upload_media(&self, metadata: &MediaMetadata, state: &PlaybackState, changed: bool) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
             self.send_media_playback(metadata, state);
 
@@ -130,7 +127,7 @@ impl Monitor {
             }
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         {
             let _ = (metadata, state, changed);
         }
@@ -163,8 +160,16 @@ fn current_media_metadata() -> Result<Option<MediaMetadata>, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn current_media_metadata() -> Result<Option<MediaMetadata>, String> {
-    crate::platform::linux::get_media_metadata()
+fn current_media_info() -> Result<Option<(MediaMetadata, PlaybackState)>, String> {
+    crate::platform::linux::get_media_info()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn current_media_info() -> Result<Option<(MediaMetadata, PlaybackState)>, String> {
+    let Some(metadata) = current_media_metadata()? else {
+        return Ok(None);
+    };
+    Ok(current_playback_state()?.map(|state| (metadata, state)))
 }
 
 #[cfg(target_os = "macos")]
@@ -177,12 +182,7 @@ fn current_playback_state() -> Result<Option<PlaybackState>, String> {
     crate::platform::windows::get_playback_state()
 }
 
-#[cfg(target_os = "linux")]
-fn current_playback_state() -> Result<Option<PlaybackState>, String> {
-    crate::platform::linux::get_playback_state()
-}
-
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn extract_artwork_data(metadata: &MediaMetadata) -> Option<Vec<u8>> {
     metadata.artwork_data.as_ref().map(|data| data.to_vec())
 }
@@ -193,9 +193,4 @@ fn extract_artwork_data(metadata: &MediaMetadata) -> Option<Vec<u8>> {
         .artwork_data
         .as_ref()
         .and_then(|artwork| BASE64.decode(artwork).ok())
-}
-
-#[cfg(target_os = "linux")]
-fn extract_artwork_data(_metadata: &MediaMetadata) -> Option<Vec<u8>> {
-    None
 }

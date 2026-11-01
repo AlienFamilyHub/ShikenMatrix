@@ -178,7 +178,9 @@ fn get_status(state: State<'_, AppState>) -> ConnectionStatus {
 fn check_permissions() -> PermissionStatus {
     #[cfg(target_os = "macos")]
     let accessibility = platform::macos::check_accessibility_permission();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    let accessibility = platform::linux::check_permissions();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     let accessibility = true;
 
     #[cfg(target_os = "macos")]
@@ -197,6 +199,10 @@ fn check_permissions() -> PermissionStatus {
 fn request_permissions() {
     #[cfg(target_os = "macos")]
     let _ = platform::macos::request_accessibility_permission();
+    #[cfg(target_os = "linux")]
+    if let Err(error) = platform::linux::request_permissions() {
+        tracing::warn!("Linux 窗口采集不可用: {error}");
+    }
 }
 
 fn init_tracing() {
