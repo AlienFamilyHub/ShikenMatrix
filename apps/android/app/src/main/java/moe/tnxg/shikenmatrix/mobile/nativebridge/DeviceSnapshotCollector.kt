@@ -12,12 +12,12 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.location.LocationManager
-import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.os.Build
+import android.os.PowerManager
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -26,7 +26,6 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 
 class DeviceSnapshotCollector(private val context: Context) {
-    private val rootManager = RootManager(context)
     private val assets = mutableListOf<DeviceSnapshotAsset>()
 
     fun collectSnapshot(): DeviceSnapshot {
@@ -37,6 +36,7 @@ class DeviceSnapshotCollector(private val context: Context) {
 
     fun collectJson(): JSONObject =
         JSONObject()
+            .put("screenOff", !(context.getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive)
             .put("foregroundApp", foregroundApp())
             .put("media", media())
             .put("battery", battery())
@@ -48,7 +48,7 @@ class DeviceSnapshotCollector(private val context: Context) {
         val foreground = JSONObject()
         val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
         val endTime = System.currentTimeMillis()
-        val events = usageStatsManager.queryEvents(endTime - 60_000, endTime)
+        val events = usageStatsManager.queryEvents(endTime - 60_000, endTime) ?: return foreground
         var packageName: String? = null
         val event = UsageEvents.Event()
 
@@ -57,16 +57,6 @@ class DeviceSnapshotCollector(private val context: Context) {
             if (event.eventType == UsageEvents.Event.MOVE_TO_FOREGROUND) {
                 packageName = event.packageName
             }
-        }
-
-        if (packageName == null) {
-            packageName = rootManager
-                .runRootCommand("dumpsys window | grep -E 'mCurrentFocus|topResumedActivity'")
-                ?.substringAfter("{", "")
-                ?.substringBefore("}", "")
-                ?.split(" ")
-                ?.firstOrNull { it.contains("/") }
-                ?.substringBefore("/")
         }
 
         foreground.put("packageName", packageName)
@@ -80,9 +70,12 @@ class DeviceSnapshotCollector(private val context: Context) {
         val media = JSONObject()
         val sessionManager = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
         val controller = runCatching {
-            sessionManager.getActiveSessions(
+            val sessions = sessionManager.getActiveSessions(
                 android.content.ComponentName(context, ShikenMatrixNotificationListenerService::class.java),
-            ).firstOrNull()
+            )
+            sessions.firstOrNull {
+                it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            } ?: sessions.firstOrNull()
         }.getOrNull()
 
         val metadata = controller?.metadata

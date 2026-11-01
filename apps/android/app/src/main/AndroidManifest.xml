@@ -3,24 +3,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <queries>
-      <package android:name="com.topjohnwu.magisk" />
-      <package android:name="io.github.vvb2060.magisk" />
-      <package android:name="io.github.huskydg.magisk" />
-      <package android:name="me.weishu.kernelsu" />
-      <package android:name="com.rifsxd.ksunext" />
-      <package android:name="io.github.rifsxd.ksunext" />
-      <package android:name="com.sukisu.ultra" />
-      <package android:name="me.bmax.apatch" />
-    </queries>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
       android:name=".MainApplication"
@@ -43,10 +32,24 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+      <receiver
+        android:name=".nativebridge.ReportingBootReceiver"
+        android:enabled="true"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="android.intent.action.BOOT_COMPLETED" />
+          <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        </intent-filter>
+      </receiver>
+      <!-- Explicit continuous device-presence monitoring; location is optional when granted. -->
       <service
-        android:name=".nativebridge.ShikenMatrixKeepAliveService"
-        android:foregroundServiceType="dataSync"
-        android:exported="false" />
+        android:name=".nativebridge.BackgroundReportingService"
+        android:exported="false"
+        android:foregroundServiceType="specialUse|location">
+        <property
+          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+          android:value="User-enabled, user-visible continuous device and media presence monitoring with an ongoing notification: actual song changes, battery, network, screen state and optional permitted location reported to the user's own server while the app is in the background." />
+      </service>
       <service
         android:name=".nativebridge.ShikenMatrixNotificationListenerService"
         android:label="@string/app_name"
@@ -56,17 +59,5 @@
           <action android:name="android.service.notification.NotificationListenerService" />
         </intent-filter>
       </service>
-      <receiver
-        android:name=".nativebridge.ShikenMatrixBootReceiver"
-        android:directBootAware="true"
-        android:enabled="true"
-        android:exported="false">
-        <intent-filter>
-          <action android:name="android.intent.action.BOOT_COMPLETED" />
-          <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-          <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-          <action android:name="moe.tnxg.shikenmatrix.mobile.action.WATCHDOG" />
-        </intent-filter>
-      </receiver>
     </application>
 </manifest>

@@ -1,8 +1,10 @@
 package moe.tnxg.shikenmatrix.mobile
 
 import android.Manifest
+import android.app.AlertDialog
 import android.content.Intent
 import android.net.Uri
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -11,9 +13,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import moe.tnxg.shikenmatrix.mobile.nativebridge.BackgroundReporter
 import moe.tnxg.shikenmatrix.mobile.nativebridge.DeviceSnapshotCollector
-import moe.tnxg.shikenmatrix.mobile.nativebridge.KeepAliveController
 import moe.tnxg.shikenmatrix.mobile.nativebridge.MobileReporterConfigStore
-import moe.tnxg.shikenmatrix.mobile.nativebridge.RootManager
+import moe.tnxg.shikenmatrix.mobile.nativebridge.BackgroundReportingController
 import moe.tnxg.shikenmatrix.mobile.ui.ShikenMatrixScreen
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -21,6 +22,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Restore configured reporting; screen state is metadata, not connectivity.
+        BackgroundReportingController.sync(applicationContext)
+        BackgroundReporter.start(applicationContext)
+
         setContent {
             MiuixTheme {
                 ShikenMatrixScreen(
@@ -30,40 +36,39 @@ class MainActivity : ComponentActivity() {
                     collectSnapshot = { DeviceSnapshotCollector(applicationContext).collectSnapshot() },
                     configureBackgroundReporter = { serverUrl, apiKey, intervalMs, enabled ->
                         BackgroundReporter.configure(applicationContext, serverUrl, apiKey, intervalMs, enabled)
+                        BackgroundReportingController.resume(applicationContext)
                     },
-                    startKeepAlive = ::startKeepAlive,
-                    stopKeepAlive = ::stopKeepAlive,
-                    isKeepAliveEnabled = { KeepAliveController.isEnabled(applicationContext) },
                     requestRuntimePermissions = ::requestRuntimePermissions,
+                    requestReportingNotificationPermission = ::requestReportingNotificationPermission,
                     openSettings = ::openSettings,
-                    requestRoot = { RootManager(applicationContext).requestRoot() },
-                    openRootManager = { RootManager(applicationContext).openRootManager() },
                 )
             }
         }
     }
 
-    private fun startKeepAlive() {
-        KeepAliveController.enable(this)
+    override fun onResume() {
+        super.onResume()
+        BackgroundReporter.start(applicationContext)
+        BackgroundReportingController.resume(applicationContext)
     }
 
-    private fun stopKeepAlive() {
-        BackgroundReporter.disable(this)
-        KeepAliveController.disable(this)
+    private fun requestReportingNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            AlertDialog.Builder(this)
+                .setTitle("允许后台上报通知？")
+                .setMessage("定时上报会运行低优先级通知的前台服务，以尽量在熄屏时更新歌曲和设备状态。" +
+                    "通知权限仅用于显示提示；拒绝或暂不授权都不会阻止上报。")
+                .setPositiveButton("继续") { _, _ ->
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 34952)
+                }
+                .setNegativeButton("暂不", null)
+                .show()
+        }
     }
 
     private fun requestRuntimePermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            requestPermissions(
-                arrayOf(
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.POST_NOTIFICATIONS,
-                ),
-                34951,
-            )
-            return
-        }
-
         requestPermissions(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), 34951)
     }
 
@@ -71,8 +76,8 @@ class MainActivity : ComponentActivity() {
         val intent = when (kind) {
             SettingsKind.UsageAccess -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
             SettingsKind.NotificationListener -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-            SettingsKind.BatteryOptimization -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
             SettingsKind.Location -> Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            SettingsKind.BatteryOptimization -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
             SettingsKind.AppDetails -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 .setData(Uri.parse("package:$packageName"))
         }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -82,8 +87,8 @@ class MainActivity : ComponentActivity() {
     enum class SettingsKind {
         UsageAccess,
         NotificationListener,
-        BatteryOptimization,
         Location,
         AppDetails,
+        BatteryOptimization,
     }
 }

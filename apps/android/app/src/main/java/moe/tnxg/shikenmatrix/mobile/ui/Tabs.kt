@@ -42,7 +42,6 @@ import moe.tnxg.shikenmatrix.mobile.nativebridge.DeviceSnapshot
 @Composable
 internal fun DashboardTab(
     connected: Boolean,
-    keepAlive: Boolean,
     logs: List<String>,
     lastSnapshot: DeviceSnapshot?,
     onConnect: () -> Unit,
@@ -79,7 +78,7 @@ internal fun DashboardTab(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item {
-                HeaderSupportingContent(connected = connected, keepAlive = keepAlive, alpha = 1f)
+                HeaderSupportingContent(connected = connected, alpha = 1f)
             }
             item {
                 Panel(title = "快捷操作") {
@@ -132,14 +131,16 @@ internal fun SettingsTab(
     onReportIntervalChange: (String) -> Unit,
     autoReport: Boolean,
     onAutoReportChange: (Boolean) -> Unit,
+    backgroundServiceRunning: Boolean,
+    backgroundServiceStatus: String,
+    onRequestReportingNotificationPermission: () -> Unit,
     onSaveConfig: () -> Unit,
-    keepAlive: Boolean,
-    onToggleKeepAlive: () -> Unit,
     onRequestRuntimePermissions: () -> Unit,
     onOpenUsageAccess: () -> Unit,
     onOpenNotificationListener: () -> Unit,
-    onOpenBatterySettings: () -> Unit,
     onOpenLocationSettings: () -> Unit,
+    onOpenBatteryOptimizationSettings: () -> Unit,
+    onOpenAppDetails: () -> Unit,
     permissionStatus: PermissionStatus,
     contentPadding: PaddingValues,
     scrollState: ScrollState = rememberScrollState(),
@@ -163,20 +164,50 @@ internal fun SettingsTab(
             autoReport = autoReport,
             onAutoReportChange = onAutoReportChange,
             onSaveConfig = onSaveConfig,
-            keepAlive = keepAlive,
-            onToggleKeepAlive = onToggleKeepAlive,
         )
+        Panel(title = "后台上报") {
+            MiuixText(
+                text = if (backgroundServiceRunning) "前台服务运行中" else "前台服务未运行",
+                color = if (backgroundServiceRunning) Color(0xFF087A3E) else Color(0xFF646A73),
+                fontSize = 14.sp,
+            )
+            MiuixText(text = backgroundServiceStatus, color = Color(0xFF646A73), fontSize = 12.sp)
+            MiuixText(
+                text = "定时上报开启后运行低优先级通知的前台服务，尽量在后台和熄屏时更新歌曲与设备状态。" +
+                    "通知监听授权后，通过媒体会话变化回调及时更新歌曲，并以定时采集兜底。" +
+                    "屏幕熄灭不代表掉线；只有连接真正中断才显示离线。通知权限可选，拒绝不阻止上报。",
+                color = Color(0xFF646A73),
+                fontSize = 13.sp,
+            )
+            ActionRow {
+                ActionButton(label = "允许上报通知（可选）", onClick = onRequestReportingNotificationPermission)
+            }
+            MiuixText(
+                text = "电池优化豁免：" + (if (permissionStatus.batteryOptimizationExempt) "已豁免" else "未豁免（可能延迟后台更新）") +
+                    "\n系统后台限制：" + when (permissionStatus.backgroundRestricted) {
+                        true -> "受限制，建议在应用电池设置中检查"
+                        false -> "未报告限制（厂商策略仍可能影响运行）"
+                        null -> "系统未提供此状态，请手动检查"
+                    },
+                color = Color(0xFF646A73),
+                fontSize = 12.sp,
+            )
+            MiuixText(
+                text = "请在系统设置中允许自启动和后台运行，必要时选择不限制电池使用；本应用不会静默修改电池策略。" +
+                    "即使允许也不保证永远运行。",
+                color = Color(0xFF646A73),
+                fontSize = 12.sp,
+            )
+            ActionRow {
+                ActionButton(label = "电池优化设置", onClick = onOpenBatteryOptimizationSettings)
+                ActionButton(label = "应用电池限制", onClick = onOpenAppDetails)
+            }
+        }
 
         Panel(title = "系统权限与跳转") {
             PermissionRow(
                 label = "粗略位置",
                 granted = permissionStatus.coarseLocation,
-                actionLabel = "申请",
-                onClick = onRequestRuntimePermissions,
-            )
-            PermissionRow(
-                label = "通知权限",
-                granted = permissionStatus.postNotifications,
                 actionLabel = "申请",
                 onClick = onRequestRuntimePermissions,
             )
@@ -191,12 +222,6 @@ internal fun SettingsTab(
                 granted = permissionStatus.notificationListener,
                 actionLabel = "去设置",
                 onClick = onOpenNotificationListener,
-            )
-            PermissionRow(
-                label = "电池优化白名单",
-                granted = permissionStatus.batteryOptimizationIgnored,
-                actionLabel = "去设置",
-                onClick = onOpenBatterySettings,
             )
             PermissionRow(
                 label = "系统定位开关",
@@ -264,11 +289,7 @@ private fun PermissionBadge(granted: Boolean) {
 }
 
 @Composable
-internal fun PrivacyTab(
-    rootGranted: Boolean,
-    rootMessage: String,
-    onRequestRoot: () -> Unit,
-    onOpenRootManager: () -> Unit,
+internal fun AboutTab(
     contentPadding: PaddingValues,
     scrollState: ScrollState = rememberScrollState(),
 ) {
@@ -281,25 +302,22 @@ internal fun PrivacyTab(
     ) {
         MiuixText("关于与隐私", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color(0xFF15171C))
 
-        Panel(title = "Root 权限说明") {
-            RootGrantStatus(rootGranted = rootGranted, rootMessage = rootMessage)
+        Panel(title = "后台、熄屏与连接") {
             MiuixText(
-                text = "开启 Root 可以获取更多深层硬件信息（如：安装的模块列表、系统属性、真实温度等）。未开启 Root 则仅获取基础信息。",
+                text = "开启定时上报后，通过低优先级通知的前台服务尽量保持后台采集与连接，" +
+                    "熄屏仍会更新歌曲、媒体、电量、网络和获准的位置。熄屏只是一项设备状态，" +
+                    "不会主动断开连接，也不会仅因熄屏就显示离线。\n\n" +
+                    "不持有唤醒锁、不使用保活闹钟、不全局关闭 Doze。请在系统设置中允许自启动和后台运行；" +
+                    "前台服务仍受系统时限、深度休眠、厂商清理和强制停止限制，不能保证永远运行。" +
+                    "未获准或未知数据不会伪造。",
                 color = Color(0xFF646A73),
                 fontSize = 13.sp,
-                modifier = Modifier.padding(bottom = 8.dp),
             )
-            ActionRow {
-                if (!rootGranted) {
-                    ActionButton(label = "申请 Root", onClick = onRequestRoot)
-                }
-                ActionButton(label = "Root 管理器", onClick = onOpenRootManager)
-            }
         }
 
         Panel(title = "数据收集声明") {
             MiuixText(
-                text = "本应用会收集以下信息并上报至您配置的服务器：\n• 基础设备标识与型号\n• 前台运行的应用包名与窗口\n• 正在播放的媒体信息(歌曲/作者/封面)\n\n我们绝不收集：\n• 您的键盘输入\n• 浏览历史\n• 相机或麦克风数据\n\n(注意：电池、网络、粗略位置在当前版本尽管采集但将被服务端直接忽略)",
+                text = "本应用会收集以下信息并上报至您配置的服务器：\n• 基础设备标识与型号\n• 前台运行的应用包名与窗口\n• 正在播放的媒体信息(歌曲/作者/封面)\n• 电量、网络状态与粗略位置\n\n我们绝不收集：\n• 您的键盘输入\n• 浏览历史\n• 相机或麦克风数据",
                 color = Color(0xFF646A73),
                 fontSize = 13.sp,
             )
@@ -318,8 +336,6 @@ private fun SettingsPanel(
     autoReport: Boolean,
     onAutoReportChange: (Boolean) -> Unit,
     onSaveConfig: () -> Unit,
-    keepAlive: Boolean,
-    onToggleKeepAlive: () -> Unit,
 ) {
     Panel(title = "Server 连接") {
         LabeledField(
@@ -342,22 +358,23 @@ private fun SettingsPanel(
         ActionRow {
             ActionButton(label = "保存配置", onClick = onSaveConfig)
         }
-        SettingsSwitchRow(label = "后台定时上报", checked = autoReport, onCheckedChange = onAutoReportChange)
-        SettingsSwitchRow(
-            label = "后台保活 / 自启动 watchdog",
-            checked = keepAlive,
-            onCheckedChange = { onToggleKeepAlive() })
+        SettingsSwitchRow(label = "定时上报", checked = autoReport, onCheckedChange = onAutoReportChange)
     }
 }
 
 @Composable
-private fun SettingsSwitchRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun SettingsSwitchRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MiuixText(text = label, color = Color(0xFF30333A), fontSize = 15.sp)
-        MiuixSwitch(checked = checked, onCheckedChange = onCheckedChange)
+        MiuixText(text = label, color = Color(0xFF30333A), fontSize = 15.sp, modifier = Modifier.weight(1f).padding(end = 12.dp))
+        MiuixSwitch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
 }

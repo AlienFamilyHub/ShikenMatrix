@@ -2,6 +2,7 @@ package moe.tnxg.shikenmatrix.mobile.ui
 
 import android.Manifest
 import android.app.AppOpsManager
+import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
@@ -13,33 +14,19 @@ import moe.tnxg.shikenmatrix.mobile.nativebridge.ShikenMatrixNotificationListene
 
 data class PermissionStatus(
     val coarseLocation: Boolean,
-    val postNotifications: Boolean,
     val usageAccess: Boolean,
     val notificationListener: Boolean,
-    val batteryOptimizationIgnored: Boolean,
     val locationEnabled: Boolean,
+    val batteryOptimizationExempt: Boolean,
+    val backgroundRestricted: Boolean?,
 ) {
-    val runtimePermissionsGranted: Boolean
-        get() = coarseLocation && postNotifications
-
     val allGranted: Boolean
-        get() = runtimePermissionsGranted &&
-                usageAccess &&
-                notificationListener &&
-                batteryOptimizationIgnored &&
-                locationEnabled
+        get() = coarseLocation && usageAccess && notificationListener && locationEnabled
 }
 
 fun Context.probePermissionStatus(): PermissionStatus {
     val coarseLocation =
         checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-    val postNotifications =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
 
     val usageAccess = run {
         val ops = getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
@@ -67,11 +54,6 @@ fun Context.probePermissionStatus(): PermissionStatus {
         flat.split(':').any { it.equals(target, ignoreCase = true) }
     }
 
-    val batteryOptimizationIgnored = run {
-        val power = getSystemService(Context.POWER_SERVICE) as PowerManager
-        power.isIgnoringBatteryOptimizations(packageName)
-    }
-
     val locationEnabled = run {
         val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -85,10 +67,13 @@ fun Context.probePermissionStatus(): PermissionStatus {
 
     return PermissionStatus(
         coarseLocation = coarseLocation,
-        postNotifications = postNotifications,
         usageAccess = usageAccess,
         notificationListener = notificationListener,
-        batteryOptimizationIgnored = batteryOptimizationIgnored,
         locationEnabled = locationEnabled,
+        batteryOptimizationExempt = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+            .isIgnoringBatteryOptimizations(packageName),
+        backgroundRestricted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).isBackgroundRestricted
+        } else null,
     )
 }

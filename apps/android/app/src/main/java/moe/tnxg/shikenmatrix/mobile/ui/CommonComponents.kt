@@ -43,7 +43,6 @@ import top.yukonga.miuix.kmp.icon.extended.Show
 @Composable
 internal fun Header(
     connected: Boolean,
-    keepAlive: Boolean,
     modifier: Modifier = Modifier,
     collapseProgress: Float = 0f,
 ) {
@@ -52,7 +51,7 @@ internal fun Header(
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HeaderTitle(collapseProgress = progress)
-        HeaderSupportingContent(connected = connected, keepAlive = keepAlive, alpha = supportingContentAlpha)
+        HeaderSupportingContent(connected = connected, alpha = supportingContentAlpha)
     }
 }
 
@@ -75,7 +74,6 @@ internal fun HeaderTitle(
 @Composable
 internal fun HeaderSupportingContent(
     connected: Boolean,
-    keepAlive: Boolean,
     alpha: Float,
 ) {
     Column(
@@ -88,36 +86,8 @@ internal fun HeaderSupportingContent(
             color = Color(0xFF6B7280),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 4.dp)) {
-            StatusPill(label = if (connected) "WS connected" else "WS offline", active = connected)
-            StatusPill(label = if (keepAlive) "Watchdog on" else "Watchdog off", active = keepAlive)
+            StatusPill(label = if (connected) "已连接" else "未连接", active = connected)
         }
-    }
-}
-
-@Composable
-internal fun RootGrantStatus(rootGranted: Boolean, rootMessage: String) {
-    if (!rootGranted) return
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        MiuixText(
-            text = "✓",
-            color = Color(0xFF16A34A),
-            fontSize = 64.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        MiuixText(
-            text = "Root 已授权",
-            color = Color(0xFF087A3E),
-            fontSize = 18.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-        MiuixText(text = rootMessage, color = Color(0xFF4B5563), fontSize = 12.sp)
     }
 }
 

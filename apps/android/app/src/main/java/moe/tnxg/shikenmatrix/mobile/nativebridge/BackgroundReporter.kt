@@ -11,11 +11,17 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import okio.ByteString.Companion.toByteString
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 
+/**
+ * 上报会话。
+ *
+ * 自动上报与屏幕状态相互独立；熄屏继续采集，只有连接断开才离线。
+ * 前台服务负责后台运行；不持有 wakelock，不使用保活闹钟。
+ */
 object BackgroundReporter {
     private val client = OkHttpClient.Builder()
         .retryOnConnectionFailure(true)
@@ -35,7 +41,10 @@ object BackgroundReporter {
     private var lastSuccessfulReportAtMs: Long = 0L
     private val confirmedCachedAssetIds = ConcurrentHashMap.newKeySet<String>()
     private val pendingAssetProbes = ConcurrentHashMap<String, AssetCacheProbe>()
+    @Volatile
     private var executor: ScheduledExecutorService? = null
+
+    private val sendLock = Any()
 
     @Volatile
     private var sessionConfig: ReporterSessionConfig? = null
@@ -59,6 +68,14 @@ object BackgroundReporter {
 
     @Volatile
     var onConnectionChanged: ((Boolean) -> Unit)? = null
+    @Volatile
+    var isConnected: Boolean = false
+        private set
+
+    private fun publishConnection(connected: Boolean) {
+        isConnected = connected
+        onConnectionChanged?.invoke(connected)
+    }
 
     fun configure(
         context: Context,
@@ -69,7 +86,7 @@ object BackgroundReporter {
     ) {
         MobileReporterConfigStore.save(
             context,
-            MobileReporterConfig(
+            MobileReporterConfigStore.read(context).copy(
                 serverUrl = serverUrl,
                 apiKey = apiKey,
                 intervalMs = intervalMs,
@@ -84,9 +101,13 @@ object BackgroundReporter {
         }
     }
 
+    @Synchronized
     fun start(context: Context) {
         val persistedConfig = MobileReporterConfigStore.read(context)
-        if (!persistedConfig.autoReport || persistedConfig.apiKey.isBlank()) return
+        if (!persistedConfig.autoReport || persistedConfig.apiKey.isBlank()) {
+            stop()
+            return
+        }
 
         val applicationContext = context.applicationContext
         val config = ReporterSessionConfig(
@@ -113,35 +134,21 @@ object BackgroundReporter {
         shouldReconnect = true
         reconnectScheduled = false
         reconnectStrategy.reset()
-        val collector = DeviceSnapshotCollector(applicationContext)
+        ScreenStateReceiver.register(
+            applicationContext,
+            onScreenOff = { requestReport() },
+            onScreenOn = { handleScreenOn(applicationContext) },
+        )
+
         executor = Executors.newSingleThreadScheduledExecutor().also { scheduledExecutor ->
+            val collector = DeviceSnapshotCollector(applicationContext)
             scheduledExecutor.scheduleAtFixedRate(
                 {
-                    runCatching {
-                        val socket = websocket ?: connect(applicationContext, config)
-                        val snapshot = collector.collectSnapshot()
-                        val stateKey = snapshot.stableStateKey()
-                        val now = SystemClock.elapsedRealtime()
-                        onSnapshotCollected?.invoke(snapshot)
-
-                        // 黑屏后状态常常不变，但服务端仍需要周期性收到当前快照来证明链路存活。
-                        val reportStale = now - lastSuccessfulReportAtMs >= config.maxSilentReportMs
-                        if ((stateKey != lastReportedStateKey || reportStale) && socket != null) {
-                            val sent = sendSnapshot(socket, snapshot, DeviceIdentity.deviceId(applicationContext))
-                            if (sent) {
-                                lastReportedStateKey = stateKey
-                                lastSuccessfulReportAtMs = now
-                            } else {
-                                if (websocket == socket) {
-                                    websocket = null
-                                }
-                                lastReportedStateKey = null
-                                scheduleReconnect()
-                            }
-                        }
+                    if (executor === scheduledExecutor) {
+                        collectAndReport(applicationContext, config, collector, force = false)
                     }
                 },
-                0,
+                config.intervalMs,
                 config.intervalMs,
                 TimeUnit.MILLISECONDS,
             )
@@ -149,6 +156,51 @@ object BackgroundReporter {
         connect(applicationContext, config)
     }
 
+    /** Both periodic collection and screen transitions run off the Android main thread. */
+    private fun collectAndReport(
+        context: Context,
+        config: ReporterSessionConfig,
+        collector: DeviceSnapshotCollector,
+        force: Boolean,
+    ) {
+        if (sessionConfig != config || !shouldReconnect) return
+        runCatching {
+            val socket = websocket ?: connect(context, config) ?: return
+            if (!isConnected) return
+            val snapshot = collector.collectSnapshot()
+            if (sessionConfig != config || !shouldReconnect) return
+            onSnapshotCollected?.invoke(snapshot)
+            val stateKey = snapshot.stableStateKey()
+            val now = SystemClock.elapsedRealtime()
+            val stale = now - lastSuccessfulReportAtMs >= config.maxSilentReportMs
+            if (force || stale || stateKey != lastReportedStateKey) {
+                if (sendSnapshot(socket, snapshot, DeviceIdentity.deviceId(context))) {
+                    lastReportedStateKey = stateKey
+                    lastSuccessfulReportAtMs = now
+                } else if (websocket === socket) {
+                    socket.cancel()
+                    connectionEnded(socket)
+                }
+            }
+        }
+    }
+
+    @Synchronized
+    fun requestReport() {
+        val context = sessionContext ?: return
+        val config = sessionConfig ?: return
+        val worker = executor ?: return
+        if (worker.isShutdown || immediateReportQueued) return
+        immediateReportQueued = true
+        worker.execute {
+            if (executor === worker) {
+                immediateReportQueued = false
+                collectAndReport(context, config, DeviceSnapshotCollector(context), force = true)
+            }
+        }
+    }
+
+    @Synchronized
     fun stop() {
         shouldReconnect = false
         reconnectScheduled = false
@@ -156,11 +208,13 @@ object BackgroundReporter {
         executor = null
         websocket?.close(1000, "stopped")
         websocket = null
-        onConnectionChanged?.invoke(false)
+        sessionContext?.let { ScreenStateReceiver.unregister(it) }
+        publishConnection(false)
         lastReportedStateKey = null
         lastSuccessfulReportAtMs = 0L
         confirmedCachedAssetIds.clear()
         pendingAssetProbes.clear()
+        immediateReportQueued = false
         sessionConfig = null
         sessionContext = null
     }
@@ -173,52 +227,32 @@ object BackgroundReporter {
     fun isEnabled(context: Context): Boolean =
         MobileReporterConfigStore.read(context).autoReport
 
-    fun startKeepAliveServiceIfEnabled(context: Context) {
-        KeepAliveController.startServiceIfEnabled(context)
-    }
+    @Volatile
+    private var immediateReportQueued = false
 
-    /**
-     * 健康检查：在系统从 Doze/休眠中唤醒我们时调用。
-     * - 若 WS 已断开 (null 或失败的输出缓冲持续堆积) 则立即重连；
-     * - 否则保持现状，OkHttp 的 pingInterval 仍在维持 keepalive。
-     */
-    fun healthCheck() {
-        if (!shouldReconnect) return
-        val cfg = sessionConfig ?: return
-        val ctx = sessionContext ?: return
-        val current = websocket
-        // null 已断；queueSize 持续堆积意味着对端不读——半开，强制重连
-        val needsReconnect = current == null || current.queueSize() > 256 * 1024L
-        if (needsReconnect) {
-            current?.close(1001, "health-check")
-            websocket = null
-            reconnectScheduled = false
-            reconnectStrategy.reset()
-            connect(ctx, cfg)
-        }
+    fun handleScreenOn(context: Context) {
+        // 不依赖进程内的旧标记：Activity 恢复也能修复漏掉的亮屏广播。
+        start(context.applicationContext)
+        requestReport()
     }
 
     fun reportSnapshot(context: Context, snapshot: DeviceSnapshot): Boolean {
-        val cfg = sessionConfig ?: MobileReporterConfigStore.read(context).let { persistedConfig ->
-            if (!persistedConfig.autoReport || persistedConfig.apiKey.isBlank()) return false
-            ReporterSessionConfig(
-                serverUrl = persistedConfig.serverUrl,
-                apiKey = persistedConfig.apiKey,
-                intervalMs = persistedConfig.intervalMs,
-            )
-        }
+        if (!shouldReconnect) return false
+        val cfg = sessionConfig ?: return false
         val ctx = sessionContext ?: context.applicationContext
         val socket = websocket ?: connect(ctx, cfg) ?: return false
         val sent = sendSnapshot(socket, snapshot, DeviceIdentity.deviceId(ctx))
         if (!sent && websocket == socket) {
-            websocket = null
-            lastReportedStateKey = null
-            scheduleReconnect()
+            socket.cancel()
+            connectionEnded(socket)
         }
         return sent
     }
 
+    @Synchronized
     private fun connect(context: Context, config: ReporterSessionConfig): WebSocket? {
+        if (!shouldReconnect) return null
+        websocket?.let { return it }
         val deviceId = DeviceIdentity.deviceId(context)
         val authedUrl = Uri.parse(config.serverUrl).buildUpon()
             .appendQueryParameter("key", config.apiKey)
@@ -231,21 +265,30 @@ object BackgroundReporter {
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    reconnectScheduled = false
-                    reconnectStrategy.reset()
-                    lastReportedStateKey = null
-                    confirmedCachedAssetIds.clear()
-                    onConnectionChanged?.invoke(true)
+                    synchronized(this@BackgroundReporter) {
+                        if (websocket !== webSocket || !shouldReconnect) {
+                            webSocket.close(1000, "superseded")
+                            return
+                        }
+                        reconnectScheduled = false
+                        reconnectStrategy.reset()
+                        lastReportedStateKey = null
+                        confirmedCachedAssetIds.clear()
+                        publishConnection(true)
+                        requestReport()
+                    }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
+                    if (websocket !== webSocket) return
                     val payload = runCatching { JSONObject(text) }.getOrNull() ?: return
-                    if (payload.optString("type") != "asset_cache_status") return
-
-                    val assetId = payload.optString("content_item_identifier")
-                    if (assetId.isBlank()) return
-
-                    pendingAssetProbes.remove(assetId)?.complete(payload.optBoolean("cached"))
+                    when (payload.optString("type")) {
+                        "asset_cache_status" -> {
+                            val assetId = payload.optString("content_item_identifier")
+                            if (assetId.isBlank()) return
+                            pendingAssetProbes.remove(assetId)?.complete(payload.optBoolean("cached"))
+                        }
+                    }
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -253,27 +296,27 @@ object BackgroundReporter {
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                    if (websocket == webSocket) {
-                        websocket = null
-                        lastReportedStateKey = null
-                        onConnectionChanged?.invoke(false)
-                    }
-                    scheduleReconnect()
+                    connectionEnded(webSocket)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    if (websocket == webSocket) {
-                        websocket = null
-                        lastReportedStateKey = null
-                        onConnectionChanged?.invoke(false)
-                    }
-                    scheduleReconnect()
+                    connectionEnded(webSocket)
                 }
             },
         )
         return websocket
     }
 
+    @Synchronized
+    private fun connectionEnded(socket: WebSocket) {
+        if (websocket !== socket) return
+        websocket = null
+        lastReportedStateKey = null
+        publishConnection(false)
+        scheduleReconnect()
+    }
+
+    @Synchronized
     private fun scheduleReconnect() {
         if (!shouldReconnect) return
         if (reconnectScheduled) return
@@ -285,14 +328,20 @@ object BackgroundReporter {
         reconnectScheduled = true
         scheduledExecutor.schedule({
             reconnectScheduled = false
-            if (shouldReconnect && websocket == null) {
+            if (executor === scheduledExecutor && shouldReconnect && websocket == null) {
                 connect(ctx, cfg)
             }
         }, delay, TimeUnit.MILLISECONDS)
     }
 
-    private fun sendSnapshot(socket: WebSocket, snapshot: DeviceSnapshot, deviceId: String): Boolean {
-        snapshot.assets.filterNot { asset -> asset.id in confirmedCachedAssetIds }.forEach { asset ->
+    private fun sendSnapshot(
+        socket: WebSocket,
+        snapshot: DeviceSnapshot,
+        deviceId: String,
+    ): Boolean = synchronized(sendLock) {
+        if (socket !== websocket || !shouldReconnect) return false
+        snapshot.assets.forEach { asset ->
+            if (asset.id in confirmedCachedAssetIds) return@forEach
             val cacheProbe = AssetCacheProbe()
             pendingAssetProbes[asset.id] = cacheProbe
             val querySent = socket.send(
@@ -322,7 +371,8 @@ object BackgroundReporter {
             confirmedCachedAssetIds.add(asset.id)
         }
 
-        return socket.send(
+        if (socket !== websocket || !shouldReconnect) return false
+        socket.send(
             JSONObject()
                 .put("type", "android_snapshot")
                 .put("deviceId", deviceId)
@@ -330,6 +380,7 @@ object BackgroundReporter {
                 .toString(),
         )
     }
+
 
     private class AssetCacheProbe {
         private val latch = CountDownLatch(1)
