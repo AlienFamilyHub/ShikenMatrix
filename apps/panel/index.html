@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f4f4f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111013" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="实时展示 Desktop 与 Android 客户端的在线状态、当前活动、媒体播放与设备信息。" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236c5ce7'/%3E%3Crect x='7' y='9' width='12' height='9' rx='2' fill='none' stroke='white' stroke-width='2'/%3E%3Crect x='21' y='13' width='5' height='11' rx='1.5' fill='none' stroke='white' stroke-width='2'/%3E%3Cpath d='M10 21h6' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E"
+    />
+    <title>Presence · 设备状态</title>
+    <script>
+      // Resolve the theme before first paint so the page never flashes.
+      try {
+        var stored = localStorage.getItem("shikenmatrix.theme");
+        var dark = stored === "dark" || (!stored && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      } catch (error) {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

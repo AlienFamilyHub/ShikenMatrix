@@ -1,4 +1,4 @@
-# Next.js build output
-.next/
-out/
-dist/
+node_modules
+dist
+.vite
+*.local
